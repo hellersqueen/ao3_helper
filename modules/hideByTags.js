@@ -1,4 +1,3 @@
-// modules/hideByTags.js
 (function(){
   'use strict';
 
@@ -42,7 +41,9 @@
   const toNorm  = (s)=> (s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().trim();
 
   function getWorkBlurbs(root=document){
-    const a = Array.from(root.querySelectorAll('#main .work.blurb.group, #main .work.blurb, #main .bookmark.blurb.group, #main .blurb.group, #main .blurb, li.blurb'));
+    const a = Array.from(root.querySelectorAll(
+      '#main .work.blurb.group, #main .work.blurb, #main .bookmark.blurb.group, #main .blurb.group, #main .blurb, li.blurb'
+    ));
     return Array.from(new Set(a));
   }
   const getTagLinks = (scope) => Array.from(scope.querySelectorAll('a.tag'));
@@ -237,30 +238,33 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
   display: flex; flex-direction: column; min-height: 25px;
 }
 .${NS}-ul-ghead {
-  display:inline; align-items:center; gap:8px; height:25px; padding:0 8px;
+  display:flex; align-items:center; gap:8px; height:34px; padding:0 10px;
   background:transparent; border:none; cursor:pointer; user-select:none;
 }
 .${NS}-ul-ghead:hover { background: rgba(0,0,0,.04); }
 .${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
 
 .${NS}-ul-chevron {
-  display:inline-block; width:10px; min-width:10px; height:10px;
-  transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px;
+  display:inline-block; min-width:1.2em; text-align:center;
+  font-size:13px; line-height:1; transform-origin:50% 50%;
+  transition: transform .18s ease;
 }
-.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(90deg); }
+.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(0deg); }
 
 .${NS}-ul-glabel {
-  font-weight:650; font-size:12px; color:#1f2937; line-height:25px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:-8px; margin-left:-15px;
+  font-weight:650; font-size:12px; color:#1f2937; line-height:1;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
 /* Collapsible content */
 .${NS}-ul-gwrap {
   overflow:hidden; max-height:0;
-  transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease;
+  transition:max-height .22s ease, padding-top .22s ease, border-color .22s ease;
+  border-top: 1px dashed transparent;
 }
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-gwrap {
-  max-height:1200px; border-top: 1px dashed #e7ebf5;
+  max-height:1200px; border-top-color:#e7ebf5;
+  padding-top:6px;
 }
 
 /* Rows */
@@ -486,7 +490,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
           comma = document.createElement('span');
           comma.className = `${NS}-tag-comma`;
           comma.textContent = ','; // la virgule visible
-          // place la virgule juste avant l’icône (ou à la fin du lien si pas d’icône)
           a.insertBefore(comma, ico || null);
         }
       } else if (comma) {
@@ -543,7 +546,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
 
   /* --------------------------- Hidden Tags Manager (ULTRA-LIGHT) --------------------------- */
   function openManager(){
-    // Utilitaire: liste triée des noms de groupes (n’inclut PAS le “sans groupe”)
     function listGroupNamesFromMap(groupsMap, hidden) {
       const names = new Set();
       for (const t of hidden) {
@@ -553,7 +555,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
       return [...names].sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
     }
 
-    // Ferme le popover si on clique dehors ou on presse Esc
     function wireOutsideToClose(pop, onClose) {
       const onDocClick = (e) => { if (!pop.contains(e.target)) { cleanup(); onClose(); } };
       const onKey = (e) => { if (e.key === 'Escape') { cleanup(); onClose(); } };
@@ -563,13 +564,11 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
       return cleanup;
     }
 
-    // Crée/affiche le picker ancré au bouton
     async function openGroupPicker(anchorBtn, currentTag, currentGroup, getHidden, getGroupsMap, setGroupsMap, onApplied) {
       const hidden = await getHidden();
       const map = await getGroupsMap();
       const groups = listGroupNamesFromMap(map, hidden);
 
-      // popover
       const pop = document.createElement('div');
       pop.className = `${NS}-gp-pop`;
       pop.innerHTML = `
@@ -582,7 +581,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
         </div>
       `;
 
-      // positionnement près du bouton
       const r = anchorBtn.getBoundingClientRect();
       Object.assign(pop.style, {
         left: `${Math.round(window.scrollX + r.left)}px`,
@@ -599,7 +597,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
 
       function itemLabel(name){ return name || '(sans groupe)'; }
 
-      // liste des groupes existants
       groups.forEach(name => {
         const row = document.createElement('div');
         row.className = `${NS}-gp-item`;
@@ -608,12 +605,11 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
           map[currentTag] = String(name || '').trim();
           await setGroupsMap(map);
           pop.remove(); cleanup();
-          onApplied(); // recharger la vue
+          onApplied();
         });
         list.appendChild(row);
       });
 
-      // appliquer un nouveau nom tapé
       btnApply.addEventListener('click', async () => {
         const newName = String(input.value || '').trim();
         map[currentTag] = newName;
@@ -623,7 +619,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
       });
       btnCancel.addEventListener('click', () => { pop.remove(); cleanup(); });
 
-      // UX: Entrée valide, Échap ferme
       input.addEventListener('keydown', async (e) => { if (e.key === 'Enter') { btnApply.click(); } });
       input.focus();
     }
@@ -663,12 +658,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
     const $count = box.querySelector(`.${NS}-ul-count`);
     const $list = box.querySelector(`.${NS}-ul-list`);
 
-    function listAllGroupNames(groupsMap, hidden){
-      const names = new Set();
-      for (const t of hidden) names.add((groupsMap[t]||'').trim());
-      return [...names].sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
-    }
-
     let searchTimer = 0;
     function onSearch(cb){ clearTimeout(searchTimer); searchTimer = setTimeout(cb, 150); }
 
@@ -704,32 +693,42 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
       for (const [gname, tags] of entries) {
         const block = document.createElement('div');
         block.className = `${NS}-ul-group`;
+
         const isCollapsed = collapsedSet.has(gname);
-        block.setAttribute('aria-expanded', String(!isCollapsed));
+        const expanded = !isCollapsed;
+        block.setAttribute('aria-expanded', String(expanded));
 
         // header
-        const head = document.createElement('div');
+        const head = document.createElement('button');
+        head.type = 'button';
         head.className = `${NS}-ul-ghead`;
-        head.setAttribute('role', 'button');
-        head.setAttribute('tabindex', '0');
 
         const chev = document.createElement('span');
         chev.className = `${NS}-ul-chevron`;
-        chev.textContent = '';
+        chev.textContent = expanded ? '▾' : '▸';
 
         const glabel = document.createElement('span');
         glabel.className = `${NS}-ul-glabel`;
         glabel.textContent = `${gname || ''} — ${tags.length}`;
 
-        function toggleGroup(){
+        const toggleGroup = ()=>{
           const nowExpanded = block.getAttribute('aria-expanded') !== 'true';
-          block.setAttribute('aria-expanded', String(nowExpanded));
-          if (nowExpanded) collapsedSet.delete(gname);
+          const next = !nowExpanded; // current->bool
+          block.setAttribute('aria-expanded', String(next));
+          chev.textContent = next ? '▾' : '▸';
+
+          // persistance
+          if (next) collapsedSet.delete(gname);
           else collapsedSet.add(gname);
           setCollapsedSet(collapsedSet);
-        }
+
+          // inline fallback pour forcer l’ouverture si CSS est surchargé par AO3
+          wrap.style.maxHeight = next ? '1200px' : '0';
+          wrap.style.borderTopColor = next ? '#e7ebf5' : 'transparent';
+          wrap.style.paddingTop = next ? '6px' : '0';
+        };
         head.addEventListener('click', toggleGroup);
-        head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(); } });
+        head.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleGroup(); } });
 
         head.append(chev, glabel);
         block.append(head);
@@ -737,6 +736,13 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
         // rows
         const wrap = document.createElement('div');
         wrap.className = `${NS}-ul-gwrap`;
+
+        // inline fallback (ouvert si expanded)
+        if (expanded){
+          wrap.style.maxHeight = '1200px';
+          wrap.style.borderTopColor = '#e7ebf5';
+          wrap.style.paddingTop = '6px';
+        }
 
         for (const tag of tags) {
           const row = document.createElement('div');
@@ -912,10 +918,8 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
     enabled = !!flags.hideByTags;
 
     onReady(() => {
-      // écouteur pour le menu du core
       document.addEventListener(`${NS}:open-hide-manager`, openManager);
 
-      // (optionnel) menu Tampermonkey
       if (typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('AO3 Helper: Manage hidden tags…', openManager);
         GM_registerMenuCommand('AO3 Helper: Show hidden tags', async ()=> {
@@ -925,7 +929,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
         });
       }
 
-      // Sur changement de flags
       document.addEventListener(`${NS}:flags-updated`, async () => {
         const f = await getFlags();
         const wasEnabled = enabled;
@@ -945,7 +948,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
         }
       });
 
-      // Initial
       if (enabled){
         attachDelegatesOnce();
         run();
