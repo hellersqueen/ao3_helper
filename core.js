@@ -1,52 +1,44 @@
 // core.js
+/* -------------------------------------------------------------
+ * AO3 Helper — Core
+ * - Safe early stub for AO3H.register (handles race conditions)
+ * - Final register supports: register('ID', def) | register(defWithId) | register({ID: def, ...})
+ * - Exposes tiny utils, storage, flags
+ * - Boots all registered modules
+ * ------------------------------------------------------------- */
+
+/* ===== EARLY STUB (runs immediately, before anything else) ===== */
+;(function () {
+  const W = window;
+  W.AO3H = W.AO3H || {};
+  // If register isn't a function yet, create a queuing stub so modules can call it safely.
+  if (typeof W.AO3H.register !== 'function') {
+    const q = [];
+    W.AO3H.__pending = q;
+    W.AO3H.register = function stubRegister(a, b) {
+      q.push([a, b]);
+    };
+  }
+})();
+
+/* =========================== CORE IIFE =========================== */
 ;(function () {
   'use strict';
 
   /* =========================
    * AO3H global + namespaces
    * ========================= */
-  window.AO3H = window.AO3H || {};
-  const AO3H = window.AO3H;
+  const W = window;
+  W.AO3H = W.AO3H || {};
+  const AO3H = W.AO3H;
 
   // Environment / constants
-  AO3H.env    = AO3H.env    || { NS: 'ao3h', DEBUG: false };
-  AO3H.util   = AO3H.util   || {};
-  AO3H.flags  = AO3H.flags  || {};
-  AO3H.modules= AO3H.modules|| {};
+  AO3H.env     = AO3H.env     || { NS: 'ao3h', DEBUG: false };
+  AO3H.util    = AO3H.util    || {};
+  AO3H.flags   = AO3H.flags   || {};
+  AO3H.modules = AO3H.modules || {};
 
   const { NS, DEBUG } = AO3H.env;
-
-  // ---- Compatibility shim: allow multiple calling styles ----
-  //   AO3H.register('ID', def)
-  //   AO3H.register(defWithId)
-  //   AO3H.register({ ID1: def1, ID2: def2 })
-  //   (if a def in the map has .id, that takes precedence over the key)
-  if (typeof AO3H.register !== 'function') {
-    AO3H.register = (arg1, arg2) => {
-      // Style: AO3H.register('ID', def)
-      if (typeof arg1 === 'string') {
-        AO3H.modules[arg1] = arg2;
-        return;
-      }
-      // Style: AO3H.register(defWithId)
-      if (arg1 && typeof arg1 === 'object' && !arg2) {
-        // Single module object with .id
-        if (typeof arg1.id === 'string' && arg1.id) {
-          AO3H.modules[arg1.id] = arg1;
-          return;
-        }
-        // Style: AO3H.register({ key: def, ... })
-        for (const [k, v] of Object.entries(arg1)) {
-          if (v && typeof v === 'object') {
-            const id = (typeof v.id === 'string' && v.id) ? v.id : k;
-            AO3H.modules[id] = v;
-          } else {
-            AO3H.modules[k] = v;
-          }
-        }
-      }
-    };
-  }
 
   /* ======================
    * Tiny logging helper
@@ -131,6 +123,47 @@
   };
 
   /* ======================
+   * FINAL register() impl
+   * ====================== */
+  function finalRegister(arg1, arg2) {
+    // Style: AO3H.register('ID', def)
+    if (typeof arg1 === 'string') {
+      AO3H.modules[arg1] = arg2;
+      return;
+    }
+    // Style: AO3H.register(defWithId)
+    if (arg1 && typeof arg1 === 'object' && !arg2) {
+      if (typeof arg1.id === 'string' && arg1.id) {
+        AO3H.modules[arg1.id] = arg1;
+        return;
+      }
+      // Style: AO3H.register({ key: def, ... })
+      for (const [k, v] of Object.entries(arg1)) {
+        if (v && typeof v === 'object') {
+          const id = (typeof v.id === 'string' && v.id) ? v.id : k;
+          AO3H.modules[id] = v;
+        } else {
+          AO3H.modules[k] = v;
+        }
+      }
+    }
+  }
+
+  // Replace stub with final, then flush any queued calls
+  const pending = AO3H.__pending || [];
+  AO3H.register = finalRegister;
+  for (const [a, b] of pending) try { finalRegister(a, b); } catch(e){ console.error('[AO3H] queued register failed', e); }
+  AO3H.__pending = []; // clear
+  document.dispatchEvent(new CustomEvent(`${NS}:register-ready`));
+
+  // Also merge legacy window.ao3hModules if present
+  if (W.ao3hModules && typeof W.ao3hModules === 'object') {
+    for (const [id, def] of Object.entries(W.ao3hModules)) {
+      try { finalRegister(id, def); } catch(e){ console.error('[AO3H] legacy merge failed', id, e); }
+    }
+  }
+
+  /* ======================
    * Flags (feature toggles)
    * ====================== */
   const Defaults = {
@@ -175,16 +208,20 @@
   (async function boot(){
     try {
       const f = await getFlags();
-      // Call init(flags) on every registered module
-      for (const mod of Object.values(AO3H.modules)) {
+
+      // Tell listeners (e.g., menu.js) that flags are ready
+      document.dispatchEvent(new CustomEvent(`${NS}:boot-flags-ready`, { detail: f }));
+
+      // Init all registered modules
+      for (const [id, mod] of Object.entries(AO3H.modules)) {
         try { await mod.init?.(f); }
-        catch (e) { console.error('[AO3H] init failed:', mod?.id || '(unknown)', e); }
+        catch (e) { console.error('[AO3H] init failed:', id || mod?.id || '(unknown)', e); }
       }
 
-      // Notify modules when flags change (optional hook)
+      // Let modules react to future flag changes (optional hook)
       on(document, `${NS}:flags-updated`, async () => {
         const nf = await getFlags();
-        for (const mod of Object.values(AO3H.modules)) {
+        for (const [id, mod] of Object.entries(AO3H.modules)) {
           try { mod.onFlagsUpdated?.(nf); } catch (e) { /* optional */ }
         }
       });
