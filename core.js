@@ -9,20 +9,41 @@
   const AO3H = window.AO3H;
 
   // Environment / constants
-  AO3H.env  = AO3H.env  || { NS: 'ao3h', DEBUG: false };
-  AO3H.util = AO3H.util || {};
-  AO3H.flags = AO3H.flags || {};
-  AO3H.modules = AO3H.modules || {};
+  AO3H.env    = AO3H.env    || { NS: 'ao3h', DEBUG: false };
+  AO3H.util   = AO3H.util   || {};
+  AO3H.flags  = AO3H.flags  || {};
+  AO3H.modules= AO3H.modules|| {};
 
   const { NS, DEBUG } = AO3H.env;
 
-  // ---- Compatibility shim so modules may call AO3H.register('Id', def) ----
+  // ---- Compatibility shim: allow multiple calling styles ----
+  //   AO3H.register('ID', def)
+  //   AO3H.register(defWithId)
+  //   AO3H.register({ ID1: def1, ID2: def2 })
+  //   (if a def in the map has .id, that takes precedence over the key)
   if (typeof AO3H.register !== 'function') {
-    AO3H.register = (idOrMap, defMaybe) => {
-      if (typeof idOrMap === 'object' && idOrMap && !defMaybe) {
-        for (const [id, def] of Object.entries(idOrMap)) AO3H.modules[id] = def;
-      } else {
-        AO3H.modules[idOrMap] = defMaybe;
+    AO3H.register = (arg1, arg2) => {
+      // Style: AO3H.register('ID', def)
+      if (typeof arg1 === 'string') {
+        AO3H.modules[arg1] = arg2;
+        return;
+      }
+      // Style: AO3H.register(defWithId)
+      if (arg1 && typeof arg1 === 'object' && !arg2) {
+        // Single module object with .id
+        if (typeof arg1.id === 'string' && arg1.id) {
+          AO3H.modules[arg1.id] = arg1;
+          return;
+        }
+        // Style: AO3H.register({ key: def, ... })
+        for (const [k, v] of Object.entries(arg1)) {
+          if (v && typeof v === 'object') {
+            const id = (typeof v.id === 'string' && v.id) ? v.id : k;
+            AO3H.modules[id] = v;
+          } else {
+            AO3H.modules[k] = v;
+          }
+        }
       }
     };
   }
@@ -39,8 +60,11 @@
   const Storage = {
     key: (k) => `${NS}:${k}`,
     async get(k, d=null){
-      try { return typeof GM_getValue === 'function' ? await GM_getValue(Storage.key(k), d) : JSON.parse(localStorage.getItem(Storage.key(k))) ?? d; }
-      catch { return d; }
+      try {
+        return (typeof GM_getValue === 'function')
+          ? await GM_getValue(Storage.key(k), d)
+          : (JSON.parse(localStorage.getItem(Storage.key(k))) ?? d);
+      } catch { return d; }
     },
     async set(k, v){
       try {
@@ -96,7 +120,7 @@
   AO3H.util.observe  = observe;
   AO3H.util.css      = css;
 
-  // (Optional) simple router if you want it in modules
+  // Optional router
   AO3H.util.route = {
     path: () => location.pathname,
     isWork: () => /^\/works\/\d+(?:\/chapters\/\d+)?$/.test(location.pathname),
@@ -125,9 +149,7 @@
       await Storage.set('flags', Defaults.features);
       return { ...Defaults.features };
     }
-    // merge in any new keys
     const merged = { ...Defaults.features, ...saved };
-    // persist if structure changed
     try {
       const same = JSON.stringify(merged) === JSON.stringify(saved);
       if (!same) await Storage.set('flags', merged);
@@ -139,7 +161,6 @@
     const flags = await getFlags();
     flags[key] = !!val;
     await Storage.set('flags', flags);
-    // notify listeners (menu + modules)
     document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`, { detail: { key, value: !!val, flags } }));
     return flags;
   }
@@ -156,15 +177,15 @@
       const f = await getFlags();
       // Call init(flags) on every registered module
       for (const mod of Object.values(AO3H.modules)) {
-        try { await mod.init?.(f); } catch (e) { console.error('[AO3H] init failed:', mod?.id || '(unknown)', e); }
+        try { await mod.init?.(f); }
+        catch (e) { console.error('[AO3H] init failed:', mod?.id || '(unknown)', e); }
       }
 
-      // If flags change later, modules can listen themselves,
-      // but we also allow re-calling init if a module wants it.
+      // Notify modules when flags change (optional hook)
       on(document, `${NS}:flags-updated`, async () => {
         const nf = await getFlags();
         for (const mod of Object.values(AO3H.modules)) {
-          try { mod.onFlagsUpdated?.(nf); } catch (e) { /* optional hook */ }
+          try { mod.onFlagsUpdated?.(nf); } catch (e) { /* optional */ }
         }
       });
     } catch (e) {
