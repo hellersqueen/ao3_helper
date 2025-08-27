@@ -3,8 +3,8 @@
   'use strict';
 
   const AO3H = window.AO3H || {};
-  const { env:{ NS } = {}, util = {}, store: Storage, flags } = AO3H;
-  const { onReady, $, $$, on, debounce, observe, css } = util || {};
+  const { env:{ NS } = {}, util = {}, flags } = AO3H;
+  const { onReady, $, $$, on, debounce, observe, css, Storage } = util || {};
   const { getFlags } = flags || {};
   if (!NS || !onReady || !$ || !$$ || !on || !debounce || !observe || !css || !Storage || !getFlags) {
     console.error('[AO3H][HideByTags] core not ready'); return;
@@ -854,6 +854,11 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration:none; margin-right:.35em
     });
   }
 
-  AO3H.modules = AO3H.modules || {};
-  AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Hide works by tags', init };
+  // Prefer register; safe fallback if not present for any reason
+  if (typeof AO3H.register === 'function') {
+    AO3H.register({ [MOD_ID]: { id: MOD_ID, title: 'Hide works by tags', init } });
+  } else {
+    AO3H.modules = AO3H.modules || {};
+    AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Hide works by tags', init };
+  }
 })();
