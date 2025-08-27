@@ -3,7 +3,7 @@
   'use strict';
 
   const AO3H = window.AO3H || {};
-  const { env:{ NS } = {}, util = {}, flags, } = AO3H;
+  const { env:{ NS } = {}, util = {}, flags } = AO3H;
   const { onReady, observe, debounce, on, css } = util || {};
   const { getFlags } = flags || {};
 
@@ -26,7 +26,6 @@
 
   function countWordsFromText(text){
     if (!text) return 0;
-    // Unicode-aware words: letters/numbers/apostrophes/hyphens
     const m = text.match(/[\p{L}\p{N}’'-]+/gu);
     return m ? m.length : 0;
   }
@@ -49,16 +48,12 @@
   }
 
   function injectPerChapterBadges(){
-    // Prefer the canonical AO3 wrapper
     let chapters = Array.from(document.querySelectorAll('#chapters .chapter'));
-    if (chapters.length === 0) {
-      // Fallback (some skins/layouts)
-      chapters = Array.from(document.querySelectorAll('#workskin .chapter'));
-    }
+    if (chapters.length === 0) chapters = Array.from(document.querySelectorAll('#workskin .chapter'));
     if (chapters.length === 0) return false;
 
     chapters.forEach(ch => {
-      if (ch.querySelector(`.${NS}-wc-badge`)) return; // avoid duplicates
+      if (ch.querySelector(`.${NS}-wc-badge`)) return;
       const words = countWordsFromChapterEl(ch);
       const header = ch.querySelector('h3.title, h2.heading, h3.heading, h2, h3') || ch;
       insertBadge(header, words, 'chapter');
@@ -94,12 +89,8 @@
     onReady(() => {
       run();
       observe(document.body, debounce(run, 250));
-
-      // react to menu toggles
       on(document, `${NS}:flags-updated`, async () => {
-        try {
-          enabled = (await getFlags()).chapterWordCount;
-        } catch { enabled = true; }
+        try { enabled = (await getFlags()).chapterWordCount; } catch { enabled = true; }
         if (!enabled) {
           document.querySelectorAll(`.${NS}-wc-badge`).forEach(el => el.remove());
         } else {
@@ -109,6 +100,11 @@
     });
   }
 
-  AO3H.modules = AO3H.modules || {};
-  AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Chapter word count', init };
+  // Prefer AO3H.register; falls back safely if it’s not there for any reason.
+  if (typeof AO3H.register === 'function') {
+    AO3H.register({ [MOD_ID]: { id: MOD_ID, title: 'Chapter word count', init } });
+  } else {
+    AO3H.modules = AO3H.modules || {};
+    AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Chapter word count', init };
+  }
 })();
