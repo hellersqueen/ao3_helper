@@ -1,61 +1,56 @@
+// modules/saveScroll.js
 ;(function(){
   'use strict';
-  const { onReady, on, throttle } = AO3H.util;
-  const Storage = AO3H.store;
-  const { getFlags } = AO3H.flags; // conservé si tu veux l'utiliser plus tard
 
-  const MOD = { id: 'SaveScroll' };
+  // Pull what we need from AO3H (defined by core.js)
+  const AO3H = window.AO3H || {};
+  const { env:{ NS } = {}, util = {}, store: Storage, flags } = AO3H;
+  const { onReady, on, throttle } = util || {};
+  const { getFlags } = flags || {};
 
-  const KEY_PREFIX = 'scroll:';
-  const isTarget = () => /^\/works\/\d+$/.test(location.pathname);
-  const keyFor   = () => KEY_PREFIX + location.pathname;
+  if (!Storage || !onReady || !on || !throttle || !getFlags || !NS) {
+    console.error('[AO3H][SaveScroll] core not ready'); return;
+  }
 
-  // Permet de retirer proprement les écouteurs si besoin
-  let abortCtrl;
+  const MOD_ID = 'SaveScroll';
 
-  const save = throttle(async ()=>{
-    if (!isTarget()) return;
-    await Storage.set(keyFor(), Math.round(window.scrollY));
-  }, 500);
+  async function init(initialFlags){
+    let enabled = !!(initialFlags && initialFlags.saveScroll);
 
-  async function restore(){
-    if (!isTarget()) return;
+    const isTarget = () => /^\/works\/\d+$/.test(location.pathname);  // only /works/<id>
+    const keyFor   = () => `scroll:${location.pathname}`;
 
-    // Si la page a déjà un hash (#anchor), on laisse le navigateur gérer
-    if (location.hash) return;
+    const save = throttle(async () => {
+      if (!enabled || !isTarget()) return;
+      try { await Storage.set(keyFor(), Math.round(window.scrollY)); } catch {}
+    }, 500);
 
-    const y = await Storage.get(keyFor(), null);
-    if (y != null) {
+    async function restore(){
+      if (!isTarget()) return;
+      const y = await Storage.get(keyFor(), null);
+      if (y == null) return;
       try {
-        window.scrollTo({ top: y, behavior: 'auto' }); // 'auto' est standard
+        // 'instant' isn't standard everywhere; fall back to auto/xy.
+        window.scrollTo({ top: y, behavior: 'auto' });
       } catch {
         window.scrollTo(0, y);
       }
     }
+
+    if (!enabled || !isTarget()) return;
+
+    onReady(async () => {
+      await restore();
+      on(window, 'scroll', save, { passive: true });
+
+      // React to toggle changes from the menu
+      document.addEventListener(`${NS}:flags-updated`, async () => {
+        try { enabled = !!(await getFlags()).saveScroll; } catch {}
+      });
+    });
   }
 
-  MOD.init = async (flags)=>{
-    if (!flags.saveScroll || !isTarget()) return;
-
-    onReady(async ()=>{
-      abortCtrl = new AbortController();
-
-      await restore();
-
-      // Sauvegarde régulière et aussi juste avant de quitter
-      window.addEventListener('scroll', save, { passive: true, signal: abortCtrl.signal });
-      window.addEventListener('beforeunload', save, { signal: abortCtrl.signal });
-
-      // Si un jour tu veux réagir au toggle sans recharger:
-      document.addEventListener('ao3h:flags-updated', async ()=>{
-        const f = await getFlags();
-        if (!f.saveScroll && abortCtrl) {
-          abortCtrl.abort();        // retire tous les écouteurs
-          abortCtrl = null;
-        }
-      }, { signal: abortCtrl.signal });
-    });
-  };
-
-  AO3H.register(MOD);
+  // Register into the shared registry
+  AO3H.modules = AO3H.modules || {};
+  AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Save scroll position', init };
 })();
