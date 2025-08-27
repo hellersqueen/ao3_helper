@@ -1,23 +1,40 @@
-;(function(){
+// modules/chapterWordCount.js
+;(function () {
   'use strict';
-  const { onReady, observe, debounce, css } = AO3H.util;
-  const { getFlags } = AO3H.flags;
-  const NS = AO3H.env.NS || 'ao3h';
 
-  // --- helpers ---
+  const AO3H = window.AO3H || {};
+  const { env:{ NS } = {}, util = {}, flags, } = AO3H;
+  const { onReady, observe, debounce, on, css } = util || {};
+  const { getFlags } = flags || {};
+
+  if (!NS || !onReady || !observe || !debounce || !on || !css || !getFlags) {
+    console.error('[AO3H][ChapterWordCount] core not ready');
+    return;
+  }
+
+  const MOD_ID = 'ChapterWordCount';
+
   function collectMainUserstuffNodes(scopeEl){
     const all = Array.from(scopeEl.querySelectorAll('.userstuff'));
     return all.filter(usd => !usd.closest('.preface, .summary, .endnotes'));
   }
-  const textFromNodes = (nodes)=> (nodes && nodes.length)
-    ? nodes.map(n => n.innerText || '').join('\n')
-    : '';
-  const countWordsFromText = (text)=>{
+
+  function textFromNodes(nodes){
+    if (!nodes || nodes.length === 0) return '';
+    return nodes.map(n => n.innerText || '').join('\n');
+  }
+
+  function countWordsFromText(text){
     if (!text) return 0;
+    // Unicode-aware words: letters/numbers/apostrophes/hyphens
     const m = text.match(/[\p{L}\p{N}’'-]+/gu);
     return m ? m.length : 0;
-  };
-  const countWordsFromChapterEl = (el)=> countWordsFromText(textFromNodes(collectMainUserstuffNodes(el)));
+  }
+
+  function countWordsFromChapterEl(chapterEl){
+    const nodes = collectMainUserstuffNodes(chapterEl);
+    return countWordsFromText(textFromNodes(nodes));
+  }
 
   function insertBadge(afterEl, words, scope='chapter'){
     if (!afterEl) return;
@@ -27,31 +44,41 @@
     const el = document.createElement('div');
     el.className = `${NS}-wc-badge`;
     el.textContent = `~ ${Number(words).toLocaleString()} words in this ${scope}`;
+    css`.${NS}-wc-badge{ margin:.5rem 0; font-size:0.95rem; opacity:.85; }`;
     afterEl.insertAdjacentElement('afterend', el);
   }
 
   function injectPerChapterBadges(){
+    // Prefer the canonical AO3 wrapper
     let chapters = Array.from(document.querySelectorAll('#chapters .chapter'));
-    if (chapters.length === 0) chapters = Array.from(document.querySelectorAll('#workskin .chapter'));
+    if (chapters.length === 0) {
+      // Fallback (some skins/layouts)
+      chapters = Array.from(document.querySelectorAll('#workskin .chapter'));
+    }
     if (chapters.length === 0) return false;
 
     chapters.forEach(ch => {
-      if (ch.querySelector(`.${NS}-wc-badge`)) return;
+      if (ch.querySelector(`.${NS}-wc-badge`)) return; // avoid duplicates
       const words = countWordsFromChapterEl(ch);
       const header = ch.querySelector('h3.title, h2.heading, h3.heading, h2, h3') || ch;
       insertBadge(header, words, 'chapter');
     });
+
     return true;
   }
 
   function injectSingleChapterBadge(){
     const workskin = document.querySelector('#workskin');
     if (!workskin) return;
+
     const chapter = workskin.querySelector('.chapter') || workskin;
     const words = countWordsFromChapterEl(chapter);
-    const anchor = workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading')
-      || chapter.querySelector('h2, h3')
-      || workskin;
+
+    const anchor =
+      workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading') ||
+      chapter.querySelector('h2, h3') ||
+      workskin;
+
     insertBadge(anchor, words, 'chapter');
   }
 
@@ -60,28 +87,28 @@
     if (!didPerChapter) injectSingleChapterBadge();
   }
 
-  const MOD = { id: 'ChapterWordCount' };
-  MOD.init = async (flags)=>{
-    if (!flags.chapterWordCount) return;
+  async function init(initialFlags){
+    let enabled = !!(initialFlags && initialFlags.chapterWordCount);
+    if (!enabled) return;
 
-    // Injecter le CSS UNE SEULE FOIS ici
-    css`
-.${NS}-wc-badge{ margin:.5rem 0; font-size:0.95rem; opacity:.85; }
-    `;
-
-    onReady(()=>{
+    onReady(() => {
       run();
       observe(document.body, debounce(run, 250));
-      document.addEventListener(`${NS}:flags-updated`, async ()=>{
-        const f = await getFlags();
-        if (!f.chapterWordCount) {
-          document.querySelectorAll(`.${NS}-wc-badge`).forEach(el=>el.remove());
+
+      // react to menu toggles
+      on(document, `${NS}:flags-updated`, async () => {
+        try {
+          enabled = (await getFlags()).chapterWordCount;
+        } catch { enabled = true; }
+        if (!enabled) {
+          document.querySelectorAll(`.${NS}-wc-badge`).forEach(el => el.remove());
         } else {
           run();
         }
       });
     });
-  };
+  }
 
-  AO3H.register(MOD);
+  AO3H.modules = AO3H.modules || {};
+  AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Chapter word count', init };
 })();
