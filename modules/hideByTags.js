@@ -1,3 +1,23 @@
+// ==UserScript==
+// @name         AO3 Helper — Module 5 (Hide By Tags, V1 visuals)
+// @namespace    ao3h
+// @version      1.0.0
+// @description  Hide works by tags with V1 visuals; registers TM menu like your old script
+// @author       you
+// @match        https://archiveofourown.org/*
+// @run-at       document-start
+//
+// --- IMPORTANT: point this to your core.js on GitHub (raw URL) ---
+/* @require     https://raw.githubusercontent.com/YOU/REPO/BRANCH/core.js */
+//
+// --- Grants needed (menu + storage used by core.js) ---
+/* @grant       GM_registerMenuCommand */
+/* @grant       GM_getValue */
+/* @grant       GM_setValue */
+/* @grant       GM_deleteValue */
+/* @grant       GM_addStyle */
+// ==/UserScript==
+
 /* Module 5 — Hide By Tags (V1 Visuals, Ultra-Light) */
 (function () {
   'use strict';
