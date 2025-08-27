@@ -1,0 +1,21 @@
+(function(){
+const { onReady, observe, debounce } = AO3H.util;
+const { getFlags } = AO3H.flags;
+
+
+const WORDS_FROM = '5000', COMPLETE='T', LANG='en';
+function isWorksLikePath(p){ return (/^\/works\/?$/.test(p) || /^\/tags\/[^/]+\/works\/?$/.test(p)); }
+function scopeKeyFromLocation(loc=location){ const m=loc.pathname.match(/^\/tags\/([^/]+)\/works\/?$/); if (m) return `ao3h:autoFilters:applied:tag:${m[1]}`; if (/^\/works\/?$/.test(loc.pathname)) return `ao3h:autoFilters:applied:works`; return `ao3h:autoFilters:applied:${loc.pathname}`; }
+function urlHasDesiredParams(u){ const sp=u.searchParams; return sp.get('work_search[words_from]')===WORDS_FROM && sp.get('work_search[complete]')===COMPLETE && sp.get('work_search[language_id]')===LANG; }
+function findFilterForm(){ const forms=Array.from(document.querySelectorAll('form')).filter(f=>{ try{ const a=new URL(f.getAttribute('action')||'', location.href); return /\/works\/?$/.test(a.pathname) || /^\/tags\/[^/]+\/works\/?$/.test(a.pathname); }catch{return false;} }); if (forms.length) return forms[0]; return document.querySelector('#work-filters form') || null; }
+function setCoreFilterValues(form){ let words=form.querySelector('input[name="work_search[words_from]"]'); if(!words){ words=document.createElement('input'); words.type='hidden'; words.name='work_search[words_from]'; form.appendChild(words);} words.value=WORDS_FROM; let rComp=form.querySelector('input[name="work_search[complete]"][value="T"]'); if(rComp){ rComp.checked=true; } else { let hidden=form.querySelector('input[type="hidden"][name="work_search[complete]"]'); if(!hidden){ hidden=document.createElement('input'); hidden.type='hidden'; hidden.name='work_search[complete]'; form.appendChild(hidden);} hidden.value=COMPLETE; } let langSel=form.querySelector('select[name="work_search[language_id]"]'); if(langSel){ langSel.value=LANG; } else { let langHidden=form.querySelector('input[type="hidden"][name="work_search[language_id]"]'); if(!langHidden){ langHidden=document.createElement('input'); langHidden.type='hidden'; langHidden.name='work_search[language_id]'; form.appendChild(langHidden);} langHidden.value=LANG; } }
+function ensurePageOneWhenSubmitting(form){ let page=form.querySelector('input[name="page"]'); if(!page){ page=document.createElement('input'); page.type='hidden'; page.name='page'; form.appendChild(page);} page.value='1'; }
+function requestSubmit(form){ if (typeof form.requestSubmit==='function') form.requestSubmit(); else form.submit(); }
+function applyOncePerScope(){ const u=new URL(location.href); const have=urlHasDesiredParams(u); const form=findFilterForm(); if(!form) return; if (form.__ao3h_autofilter_done) return; const scopeKey=scopeKeyFromLocation(u); const already=sessionStorage.getItem(scopeKey)==='1'; if (have){ sessionStorage.setItem(scopeKey,'1'); return; } if (!already){ form.__ao3h_autofilter_done=true; setCoreFilterValues(form); ensurePageOneWhenSubmitting(form); sessionStorage.setItem(scopeKey,'1'); requestAnimationFrame(()=> requestSubmit(form)); } }
+function run(){ if (!isWorksLikePath(location.pathname)) return; applyOncePerScope(); }
+
+
+const MOD = { id: 'AutoSearchFilters' };
+MOD.init = async (flags)=>{ if (!flags.autoSearchFilters) return; onReady(run); observe(document.body, debounce(run, 300)); document.addEventListener('ao3h:flags-updated', async ()=>{ const f=await getFlags(); if (f.autoSearchFilters) run(); }); };
+AO3H.register(MOD);
+})();
