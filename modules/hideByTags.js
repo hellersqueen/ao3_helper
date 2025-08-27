@@ -121,8 +121,8 @@
     return canon.filter(t => hiddenList.includes(t));
   }
 
-  // --------- styles ----------
-  css`
+ // --------- styles ----------
+css`
 /* ===================== FOLD / CUT ===================== */
 .${NS}-fold {
   position: relative;
@@ -160,23 +160,27 @@
 .${NS}-force-show { display:list-item !important; }
 
 /* ===================== INLINE HIDE ICON ===================== */
+/* Par défaut: pas d’espace réservé */
 a.tag.${NS}-tag-wrap{
   position: relative;
-  padding-right: 0;
-  overflow: visible;
-  transition: padding-right .12s;
+  padding-right: 0;                 /* pas d’espace quand pas survolé */
+  overflow: visible;                /* l’icône reste visible quand montrée */
+  transition: padding-right .12s;   /* (optionnel) adoucir l’apparition */
 }
+
+/* Au hover/focus: on AJOUTE l’espace qui va CONTENIR l’icône */
 a.tag.${NS}-tag-wrap:hover,
 a.tag.${NS}-tag-wrap:focus-visible,
 ul.commas li:hover > a.tag.${NS}-tag-wrap,
 ol.commas li:hover > a.tag.${NS}-tag-wrap,
 .commas   li:hover > a.tag.${NS}-tag-wrap{
-  padding-right: 1.4em;
+  padding-right: 1.4em;             /* espace suffisant pour l’icône */
 }
+
+/* L’icône est DEDANS le lien (dans l’espace ajouté) */
 .${NS}-hide-ico{
   position: absolute;
-  right: .2em;
-  top: 50%;
+  right: .2em; top: 50%;
   transform: translateY(-50%);
   width: 1em; height: 1em; line-height: 1em;
   text-align: center; font-size: .9em;
@@ -186,6 +190,8 @@ ol.commas li:hover > a.tag.${NS}-tag-wrap,
   transition: opacity .15s, transform .15s;
   z-index: 2;
 }
+
+/* Icône cliquable seulement visible */
 a.tag.${NS}-tag-wrap:hover .${NS}-hide-ico,
 a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
   opacity: 1; pointer-events: auto;
@@ -194,9 +200,22 @@ a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
   transform: translateY(-50%) scale(1.06);
 }
 
-/* Commas AO3: on gère les virgules dans <a> pour éviter l’orpheline */
-.${NS}-own-commas li::after { content: "" !important; }
-a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35em; }
+/* Empêche la virgule AO3 d’être orpheline */
+ul.commas li,
+ol.commas li,
+.commas li{ white-space: nowrap; }
+
+/* Réduit la taille des tags et virgules AO3 */
+ul.commas li > a.tag.${NS}-tag-wrap,
+ol.commas li > a.tag.${NS}-tag-wrap,
+.commas   li > a.tag.${NS}-tag-wrap{
+  font-size: 0.92em;
+  line-height: 1.15;
+}
+ul.commas li::after,
+ol.commas li::after,
+.commas   li::after{ font-size: 0.92em; }
+a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
 /* ===================== MANAGER PANEL (ULTRA-LIGHT) ===================== */
 .${NS}-mgr-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999998; }
@@ -212,7 +231,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
 }
 .${NS}-mgr h3 { margin:.2rem 0 .4rem; font-size:1rem; }
 
-/* Head: search + count */
+/* Head */
 .${NS}-ul-head { display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
 .${NS}-ul-search {
   border-radius: 8px; border:1px solid #cfd6e4; background:#fff;
@@ -225,49 +244,47 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
 .${NS}-ul-btn {
   height: 28px; padding: 0 10px;
   border-radius: 8px; border:1px solid #cfd6e4; background:#f5f7fb;
-  font-size:12px; cursor:pointer; transition: background .15s, transform .12s, border-color .15s;
+  font-size:12px; cursor:pointer;
+  transition: background .15s, transform .12s, border-color .15s;
 }
 .${NS}-ul-btn:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
 
-/* List area */
+/* List */
 .${NS}-ul-list { display:grid; gap:8px; max-height:none; overflow:visible; padding-right:2px; }
 
-/* ===================== EXPANDABLE GROUPS ===================== */
+/* ===================== EXPANDABLE GROUPS (V1 look) ===================== */
 .${NS}-ul-group {
-  border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px;
+  border: 1px solid #e6e8ee; background: #fff;
+  border-radius: 10px; margin-bottom: 8px;
   display: flex; flex-direction: column; min-height: 25px;
 }
 .${NS}-ul-ghead {
-  display:flex; align-items:center; gap:8px; height:34px; padding:0 10px;
+  display:inline; align-items:center; gap:8px;
+  height:25px; padding:0 8px;
   background:transparent; border:none; cursor:pointer; user-select:none;
 }
 .${NS}-ul-ghead:hover { background: rgba(0,0,0,.04); }
 .${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
-
 .${NS}-ul-chevron {
-  display:inline-block; min-width:1.2em; text-align:center;
-  font-size:13px; line-height:1; transform-origin:50% 50%;
-  transition: transform .18s ease;
+  display:inline-block; width:10px; min-width:10px; height:10px;
+  transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px;
 }
-.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(0deg); }
-
+.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(90deg); }
 .${NS}-ul-glabel {
-  font-weight:650; font-size:12px; color:#1f2937; line-height:1;
+  font-weight:650; font-size:12px; color:#1f2937;
+  line-height:25px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  margin-bottom:-8px; margin-left:-15px;
 }
-
-/* Collapsible content */
 .${NS}-ul-gwrap {
   overflow:hidden; max-height:0;
-  transition:max-height .22s ease, padding-top .22s ease, border-color .22s ease;
-  border-top: 1px dashed transparent;
+  transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease;
 }
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-gwrap {
-  max-height:1200px; border-top-color:#e7ebf5;
-  padding-top:6px;
+  max-height:1200px; border-top: 1px dashed #e7ebf5;
 }
 
-/* Rows */
+/* Rows & tags */
 .${NS}-ul-gwrap { display:grid; gap:6px; }
 .${NS}-ul-row {
   display:grid; grid-template-columns: 1fr auto auto; align-items:center; gap:8px;
@@ -275,19 +292,20 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
   transition: background .12s, border-color .12s;
 }
 .${NS}-ul-row:hover { background:#fafbfe; border-color:#e7ebf5; }
-
-/* Tag pill */
 .${NS}-ul-tag {
   display:inline-block; max-width:100%;
-  padding:4px 10px; border-radius:999px; background:#f6f7fb; border:1px solid #dfe4f0;
-  font-size:13px; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:4px 10px; border-radius:999px;
+  background:#f6f7fb; border:1px solid #dfe4f0;
+  font-size:13px; font-weight:500; color:#111827;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
 /* Buttons */
 .${NS}-ul-gbtn, .${NS}-ul-del {
   display:flex; align-items:center; justify-content:center;
   height:26px; min-width:30px; padding:0 10px;
-  border:1px solid #cfd6e4; border-radius:8px; background:#f5f7fb; font-size:12px; cursor:pointer;
+  border:1px solid #cfd6e4; border-radius:8px; background:#f5f7fb;
+  font-size:12px; cursor:pointer;
   transition: background .15s, transform .12s, border-color .15s;
 }
 .${NS}-ul-gbtn:hover, .${NS}-ul-del:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
@@ -322,7 +340,8 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
 .${NS}-gp-input { width: 100%; margin-top: 6px; padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px; }
 .${NS}-gp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 .${NS}-gp-btn {
-  padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6; cursor: pointer; font-size: 11px;
+  padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6;
+  cursor: pointer; font-size: 11px;
 }
 .${NS}-gp-btn:hover { background:#e9ecf0; }
 
@@ -331,7 +350,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
   .${NS}-ul-head { grid-template-columns: 1fr; }
   .${NS}-ul-actions { justify-content:flex-start; }
 }
-  `;
+`;
 
   // --------- UI helpers ----------
   function updateFoldContent(fold, reasons, isExpanded){
