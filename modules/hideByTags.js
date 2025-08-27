@@ -1,30 +1,32 @@
+/* Module 5 — Hide By Tags (V1 Visuals, Ultra-Light) */
 (function(){
   'use strict';
 
-  // --- dépendances du core ---
+  // ----- Guard: require AO3H core (your core.js) -----
+  if (!window.AO3H || !AO3H.util || !AO3H.store) {
+    console.warn('[AO3H:HideByTags] AO3H core not found; module not started.');
+    return;
+  }
+
+  // ----- Core deps -----
   const { onReady, observe, debounce, css } = AO3H.util;
   const { getFlags } = AO3H.flags;
-  const Storage = AO3H.store;
-  const NS = AO3H.env.NS || 'ao3h';
+  const Storage     = AO3H.store;
+  const NS          = AO3H.env?.NS || 'ao3h';
 
-  // --- état interne ---
+  // ----- State -----
   let enabled = false;
   let delegatesAttached = false;
   let observerActive = false;
 
-  // --- clés storage (GM + miroirs localStorage) ---
-  const LS_MIRROR = true;
-
-  // tags cachés (array de canonicals)
-  const TM_KEY = 'hideTags';
-  const LS_KEY = `${NS}:hideTags`;
-
-  // mapping tag->groupe (object)
-  const TM_KEY_GROUPS = 'hideTagsGroups';
-  const LS_KEY_GROUPS = `${NS}:hideTagsGroups`;
-
-  // groupes repliés (array de noms)
+  // ----- Storage keys (GM + localStorage mirror) -----
+  const LS_MIRROR        = true;
+  const TM_KEY           = 'hideTags';               // GM (via AO3H.store)
+  const LS_KEY           = `${NS}:hideTags`;         // localStorage mirror
+  const TM_KEY_GROUPS    = 'hideTagsGroups';
+  const LS_KEY_GROUPS    = `${NS}:hideTagsGroups`;
   const LS_KEY_COLLAPSED = `${NS}:hideTagsGroupsCollapsed`;
+
   function getCollapsedSet(){
     try{
       const raw = localStorage.getItem(LS_KEY_COLLAPSED) || '[]';
@@ -36,17 +38,9 @@
     try{ localStorage.setItem(LS_KEY_COLLAPSED, JSON.stringify([...set])); }catch{}
   }
 
-  // --------- utils ----------
+  // ----- Utils -----
   const toCanon = (s)=> String(s||'').trim().toLowerCase();
   const toNorm  = (s)=> (s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().trim();
-
-  function getWorkBlurbs(root=document){
-    const a = Array.from(root.querySelectorAll(
-      '#main .work.blurb.group, #main .work.blurb, #main .bookmark.blurb.group, #main .blurb.group, #main .blurb, li.blurb'
-    ));
-    return Array.from(new Set(a));
-  }
-  const getTagLinks = (scope) => Array.from(scope.querySelectorAll('a.tag'));
 
   function canonicalFromAnchor(a){
     try{
@@ -55,7 +49,7 @@
       if (!m) return null;
 
       let s = decodeURIComponent(m[1]).replace(/\+/g, ' ');
-      // AO3 star-codes → vrais caractères
+      // AO3 star-codes → real characters
       s = s.replace(/\*a\*/gi, '&').replace(/\*s\*/gi, '/');
 
       return toCanon(s.replace(/\s+/g, ' ').replace(/\u00A0/g, ' '));
@@ -103,11 +97,11 @@
   }
   async function setGroupsMap(map){
     const hidden = await getHidden();
-    const setHiddenTags = new Set(hidden);
+    const allow  = new Set(hidden);
     const cleaned = {};
     for (const [k,v] of Object.entries(map||{})){
       const key = String(k).toLowerCase();
-      if (setHiddenTags.has(key)) cleaned[key] = String(v||'').trim();
+      if (allow.has(key)) cleaned[key] = String(v||'').trim();
     }
     await Storage.set(TM_KEY_GROUPS, cleaned);
     if (LS_MIRROR){
@@ -116,13 +110,22 @@
     return cleaned;
   }
 
+  // ----- Selectors & matching -----
+  function getWorkBlurbs(root=document){
+    const a = Array.from(root.querySelectorAll(
+      '#main .work.blurb.group, #main .work.blurb, #main .bookmark.blurb.group, #main .blurb.group, #main .blurb, li.blurb'
+    ));
+    return Array.from(new Set(a));
+  }
+  const getTagLinks = (scope) => Array.from(scope.querySelectorAll('a.tag'));
+
   function reasonsFor(scope, hiddenList){
     const canon = getTagLinks(scope).map(canonicalFromAnchor).filter(Boolean);
     return canon.filter(t => hiddenList.includes(t));
   }
 
- // --------- styles ----------
-css`
+  // ----- V1 Styles (exact visuals) -----
+  css`
 /* ===================== FOLD / CUT ===================== */
 .${NS}-fold {
   position: relative;
@@ -160,24 +163,19 @@ css`
 .${NS}-force-show { display:list-item !important; }
 
 /* ===================== INLINE HIDE ICON ===================== */
-/* Par défaut: pas d’espace réservé */
 a.tag.${NS}-tag-wrap{
   position: relative;
-  padding-right: 0;                 /* pas d’espace quand pas survolé */
-  overflow: visible;                /* l’icône reste visible quand montrée */
-  transition: padding-right .12s;   /* (optionnel) adoucir l’apparition */
+  padding-right: 0;                 /* no space until hover */
+  overflow: visible;
+  transition: padding-right .12s;
 }
-
-/* Au hover/focus: on AJOUTE l’espace qui va CONTENIR l’icône */
 a.tag.${NS}-tag-wrap:hover,
 a.tag.${NS}-tag-wrap:focus-visible,
 ul.commas li:hover > a.tag.${NS}-tag-wrap,
 ol.commas li:hover > a.tag.${NS}-tag-wrap,
 .commas   li:hover > a.tag.${NS}-tag-wrap{
-  padding-right: 1.4em;             /* espace suffisant pour l’icône */
+  padding-right: 1.4em;             /* make room for icon */
 }
-
-/* L’icône est DEDANS le lien (dans l’espace ajouté) */
 .${NS}-hide-ico{
   position: absolute;
   right: .2em; top: 50%;
@@ -190,22 +188,16 @@ ol.commas li:hover > a.tag.${NS}-tag-wrap,
   transition: opacity .15s, transform .15s;
   z-index: 2;
 }
-
-/* Icône cliquable seulement visible */
 a.tag.${NS}-tag-wrap:hover .${NS}-hide-ico,
 a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
   opacity: 1; pointer-events: auto;
 }
-.${NS}-hide-ico:hover{
-  transform: translateY(-50%) scale(1.06);
-}
+.${NS}-hide-ico:hover{ transform: translateY(-50%) scale(1.06); }
 
-/* Empêche la virgule AO3 d’être orpheline */
+/* Avoid orphan AO3 commas & match typography */
 ul.commas li,
 ol.commas li,
 .commas li{ white-space: nowrap; }
-
-/* Réduit la taille des tags et virgules AO3 */
 ul.commas li > a.tag.${NS}-tag-wrap,
 ol.commas li > a.tag.${NS}-tag-wrap,
 .commas   li > a.tag.${NS}-tag-wrap{
@@ -231,7 +223,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 }
 .${NS}-mgr h3 { margin:.2rem 0 .4rem; font-size:1rem; }
 
-/* Head */
+/* Head: search + count */
 .${NS}-ul-head { display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
 .${NS}-ul-search {
   border-radius: 8px; border:1px solid #cfd6e4; background:#fff;
@@ -244,38 +236,37 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 .${NS}-ul-btn {
   height: 28px; padding: 0 10px;
   border-radius: 8px; border:1px solid #cfd6e4; background:#f5f7fb;
-  font-size:12px; cursor:pointer;
-  transition: background .15s, transform .12s, border-color .15s;
+  font-size:12px; cursor:pointer; transition: background .15s, transform .12s, border-color .15s;
 }
 .${NS}-ul-btn:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
 
-/* List */
+/* List area */
 .${NS}-ul-list { display:grid; gap:8px; max-height:none; overflow:visible; padding-right:2px; }
 
 /* ===================== EXPANDABLE GROUPS (V1 look) ===================== */
 .${NS}-ul-group {
-  border: 1px solid #e6e8ee; background: #fff;
-  border-radius: 10px; margin-bottom: 8px;
+  border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px;
   display: flex; flex-direction: column; min-height: 25px;
 }
 .${NS}-ul-ghead {
-  display:inline; align-items:center; gap:8px;
-  height:25px; padding:0 8px;
+  display:inline; align-items:center; gap:8px; height:25px; padding:0 8px;
   background:transparent; border:none; cursor:pointer; user-select:none;
 }
 .${NS}-ul-ghead:hover { background: rgba(0,0,0,.04); }
 .${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
+
 .${NS}-ul-chevron {
   display:inline-block; width:10px; min-width:10px; height:10px;
   transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px;
 }
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(90deg); }
+
 .${NS}-ul-glabel {
-  font-weight:650; font-size:12px; color:#1f2937;
-  line-height:25px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  margin-bottom:-8px; margin-left:-15px;
+  font-weight:650; font-size:12px; color:#1f2937; line-height:25px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:-8px; margin-left:-15px;
 }
+
+/* Collapsible content */
 .${NS}-ul-gwrap {
   overflow:hidden; max-height:0;
   transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease;
@@ -284,7 +275,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
   max-height:1200px; border-top: 1px dashed #e7ebf5;
 }
 
-/* Rows & tags */
+/* Rows */
 .${NS}-ul-gwrap { display:grid; gap:6px; }
 .${NS}-ul-row {
   display:grid; grid-template-columns: 1fr auto auto; align-items:center; gap:8px;
@@ -292,20 +283,19 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
   transition: background .12s, border-color .12s;
 }
 .${NS}-ul-row:hover { background:#fafbfe; border-color:#e7ebf5; }
+
+/* Tag pill */
 .${NS}-ul-tag {
   display:inline-block; max-width:100%;
-  padding:4px 10px; border-radius:999px;
-  background:#f6f7fb; border:1px solid #dfe4f0;
-  font-size:13px; font-weight:500; color:#111827;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:4px 10px; border-radius:999px; background:#f6f7fb; border:1px solid #dfe4f0;
+  font-size:13px; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
 /* Buttons */
 .${NS}-ul-gbtn, .${NS}-ul-del {
   display:flex; align-items:center; justify-content:center;
   height:26px; min-width:30px; padding:0 10px;
-  border:1px solid #cfd6e4; border-radius:8px; background:#f5f7fb;
-  font-size:12px; cursor:pointer;
+  border:1px solid #cfd6e4; border-radius:8px; background:#f5f7fb; font-size:12px; cursor:pointer;
   transition: background .15s, transform .12s, border-color .15s;
 }
 .${NS}-ul-gbtn:hover, .${NS}-ul-del:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
@@ -340,8 +330,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 .${NS}-gp-input { width: 100%; margin-top: 6px; padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px; }
 .${NS}-gp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 .${NS}-gp-btn {
-  padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6;
-  cursor: pointer; font-size: 11px;
+  padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6; cursor: pointer; font-size: 11px;
 }
 .${NS}-gp-btn:hover { background:#e9ecf0; }
 
@@ -350,9 +339,9 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
   .${NS}-ul-head { grid-template-columns: 1fr; }
   .${NS}-ul-actions { justify-content:flex-start; }
 }
-`;
+  `;
 
-  // --------- UI helpers ----------
+  // ----- UI helpers (V1 logic) -----
   function updateFoldContent(fold, reasons, isExpanded){
     fold.innerHTML = '';
 
@@ -434,7 +423,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
   }
   function unwrapWork(blurb){
     const fold = blurb.querySelector(`.${NS}-fold`);
-    const cut = blurb.querySelector(`.${NS}-cut`);
+    const cut  = blurb.querySelector(`.${NS}-cut`);
     blurb.classList.remove(`${NS}-wrapped`, `${NS}-force-show`);
     if (fold) fold.remove();
     if (cut){
@@ -445,7 +434,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
     blurb.style && blurb.style.removeProperty && blurb.style.removeProperty('display');
   }
 
-  // ---- AO3 tag commas + inline icon (idempotent) ----
+  // ----- AO3 tag commas + inline icon (idempotent) -----
   function ensureInlineIcons(root=document){
     const scopes = getWorkBlurbs(root);
     if (scopes.length === 0) {
@@ -460,12 +449,12 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
   function ensureInlineIconsFor(scope){
     const tags = getTagLinks(scope);
-    const managedLists = new Set(); // <ul/ol> .commas gérées
+    const managedLists = new Set(); // <ul/ol> .commas we control
 
     tags.forEach(a => {
       a.classList.add(`${NS}-tag-wrap`);
 
-      // 1) Icône (idempotent)
+      // 1) Icon (idempotent)
       let ico = a.querySelector(`.${NS}-hide-ico`);
       if (!ico) {
         const canon = canonicalFromAnchor(a);
@@ -481,7 +470,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
         }
       }
 
-      // 2) Envelopper le texte du tag pour pouvoir insérer la virgule avant l’icône
+      // 2) Wrap text node so we can insert comma *before* the icon
       let textWrap = a.querySelector(`.${NS}-tag-txt`);
       if (!textWrap) {
         for (let n = a.firstChild; n; n = n.nextSibling) {
@@ -495,32 +484,32 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
         }
       }
 
-      // 3) Si on est dans une liste AO3 .commas, ajouter la virgule dans le <a>
-      const li = a.closest('li');
+      // 3) If inside AO3 .commas list, inject our visible comma into <a>
+      const li   = a.closest('li');
       const list = a.closest('ul.commas, ol.commas, .commas');
       if (!li || !list || !textWrap) return;
 
       managedLists.add(list);
 
-      const needsComma = !!li.nextElementSibling; // pas de virgule pour le dernier
+      const needsComma = !!li.nextElementSibling; // last item gets no comma
       let comma = a.querySelector(`.${NS}-tag-comma`);
       if (needsComma) {
         if (!comma) {
           comma = document.createElement('span');
           comma.className = `${NS}-tag-comma`;
-          comma.textContent = ','; // la virgule visible
-          a.insertBefore(comma, ico || null);
+          comma.textContent = ',';
+          a.insertBefore(comma, ico || null); // place before icon
         }
       } else if (comma) {
         comma.remove();
       }
     });
 
-    // Marquer les listes gérées pour couper li::after uniquement ici
+    // Mark lists we manage to suppress AO3's li::after comma only there
     managedLists.forEach(ul => ul.classList.add(`${NS}-own-commas`));
   }
 
-  // tiny toast
+  // ----- tiny toast -----
   function toast(msg){
     const el = document.createElement('div');
     el.className = `${NS}-toast`;
@@ -533,6 +522,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
     }, 1000);
   }
 
+  // ----- Delegated events (once) -----
   function attachDelegatesOnce(){
     if (delegatesAttached) return;
     delegatesAttached = true;
@@ -563,8 +553,9 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
     }, true);
   }
 
-  /* --------------------------- Hidden Tags Manager (ULTRA-LIGHT) --------------------------- */
+  // --------------------------- Hidden Tags Manager (V1) ---------------------------
   function openManager(){
+    // helper: unique sorted visible group names from current map+hidden
     function listGroupNamesFromMap(groupsMap, hidden) {
       const names = new Set();
       for (const t of hidden) {
@@ -574,6 +565,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
       return [...names].sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
     }
 
+    // Popover outside/esc closer
     function wireOutsideToClose(pop, onClose) {
       const onDocClick = (e) => { if (!pop.contains(e.target)) { cleanup(); onClose(); } };
       const onKey = (e) => { if (e.key === 'Escape') { cleanup(); onClose(); } };
@@ -583,9 +575,10 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
       return cleanup;
     }
 
+    // Mini group picker
     async function openGroupPicker(anchorBtn, currentTag, currentGroup, getHidden, getGroupsMap, setGroupsMap, onApplied) {
       const hidden = await getHidden();
-      const map = await getGroupsMap();
+      const map    = await getGroupsMap();
       const groups = listGroupNamesFromMap(map, hidden);
 
       const pop = document.createElement('div');
@@ -609,10 +602,10 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
       document.body.appendChild(pop);
       const cleanup = wireOutsideToClose(pop, () => pop.remove());
 
-      const list = pop.querySelector(`.${NS}-gp-list`);
-      const input = pop.querySelector(`.${NS}-gp-input`);
+      const list     = pop.querySelector(`.${NS}-gp-list`);
+      const input    = pop.querySelector(`.${NS}-gp-input`);
       const btnApply = pop.querySelector('.apply');
-      const btnCancel = pop.querySelector('.cancel');
+      const btnCancel= pop.querySelector('.cancel');
 
       function itemLabel(name){ return name || '(sans groupe)'; }
 
@@ -674,14 +667,14 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
     document.body.append(backdrop, box);
 
     const $search = box.querySelector(`.${NS}-ul-search`);
-    const $count = box.querySelector(`.${NS}-ul-count`);
-    const $list = box.querySelector(`.${NS}-ul-list`);
+    const $count  = box.querySelector(`.${NS}-ul-count`);
+    const $list   = box.querySelector(`.${NS}-ul-list`);
 
     let searchTimer = 0;
     function onSearch(cb){ clearTimeout(searchTimer); searchTimer = setTimeout(cb, 150); }
 
     async function reload(){
-      const hidden = await getHidden();
+      const hidden    = await getHidden();
       const groupsMap = await getGroupsMap();
       const qn = toNorm($search.value || '');
 
@@ -689,7 +682,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
         !qn || toNorm(t).includes(qn) || toNorm(groupsMap[t] || '').includes(qn)
       );
 
-      // groupName ('' => sans groupe) -> tags[]
+      // Build groups -> tags (show “sans groupe” for empty)
       const grouped = new Map();
       for (const t of filtered) {
         const g = (groupsMap[t] || '').trim();
@@ -698,7 +691,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
         grouped.get(key).push(t);
       }
 
-      // tri
+      // Sort within groups + groups A→Z
       for (const [, arr] of grouped) {
         arr.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
       }
@@ -707,6 +700,8 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
       $list.innerHTML = '';
       let shown = 0;
+
+      // Persistent collapsed state
       const collapsedSet = getCollapsedSet();
 
       for (const [gname, tags] of entries) {
@@ -714,54 +709,38 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
         block.className = `${NS}-ul-group`;
 
         const isCollapsed = collapsedSet.has(gname);
-        const expanded = !isCollapsed;
-        block.setAttribute('aria-expanded', String(expanded));
+        block.setAttribute('aria-expanded', String(!isCollapsed));
 
-        // header
-        const head = document.createElement('button');
-        head.type = 'button';
+        // Header (V1 style: inline role/button)
+        const head = document.createElement('div');
         head.className = `${NS}-ul-ghead`;
+        head.setAttribute('role', 'button');
+        head.setAttribute('tabindex', '0');
 
         const chev = document.createElement('span');
         chev.className = `${NS}-ul-chevron`;
-        chev.textContent = expanded ? '▾' : '▸';
+        chev.textContent = ''; // purely CSS-rotated caret box
 
         const glabel = document.createElement('span');
         glabel.className = `${NS}-ul-glabel`;
         glabel.textContent = `${gname || ''} — ${tags.length}`;
 
-        const toggleGroup = ()=>{
+        function toggleGroup(){
           const nowExpanded = block.getAttribute('aria-expanded') !== 'true';
-          const next = !nowExpanded; // current->bool
-          block.setAttribute('aria-expanded', String(next));
-          chev.textContent = next ? '▾' : '▸';
-
-          // persistance
-          if (next) collapsedSet.delete(gname);
+          block.setAttribute('aria-expanded', String(nowExpanded));
+          if (nowExpanded) collapsedSet.delete(gname);
           else collapsedSet.add(gname);
           setCollapsedSet(collapsedSet);
-
-          // inline fallback pour forcer l’ouverture si CSS est surchargé par AO3
-          wrap.style.maxHeight = next ? '1200px' : '0';
-          wrap.style.borderTopColor = next ? '#e7ebf5' : 'transparent';
-          wrap.style.paddingTop = next ? '6px' : '0';
-        };
+        }
         head.addEventListener('click', toggleGroup);
-        head.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleGroup(); } });
+        head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(); } });
 
         head.append(chev, glabel);
         block.append(head);
 
-        // rows
+        // Rows
         const wrap = document.createElement('div');
         wrap.className = `${NS}-ul-gwrap`;
-
-        // inline fallback (ouvert si expanded)
-        if (expanded){
-          wrap.style.maxHeight = '1200px';
-          wrap.style.borderTopColor = '#e7ebf5';
-          wrap.style.paddingTop = '6px';
-        }
 
         for (const tag of tags) {
           const row = document.createElement('div');
@@ -771,6 +750,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
           label.className = `${NS}-ul-tag`;
           label.textContent = tag;
 
+          // Group picker button
           const gbtn = document.createElement('button');
           gbtn.className = `${NS}-ul-gbtn`;
           gbtn.type = 'button';
@@ -789,6 +769,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
             );
           });
 
+          // Delete tag (confirm)
           const del = document.createElement('button');
           del.className = `${NS}-ul-btn ${NS}-ul-del`;
           del.textContent = '🗑️';
@@ -826,8 +807,8 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
     box.querySelector('.export').addEventListener('click', async () => {
       const list = await getHidden();
       const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
       a.href = url; a.download = 'ao3h-hidden-tags.json';
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
@@ -863,10 +844,10 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
     // Export/Import GROUPS MAP (object)
     box.querySelector('.exportg').addEventListener('click', async () => {
-      const map = await getGroupsMap();
+      const map  = await getGroupsMap();
       const blob = new Blob([JSON.stringify(map, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
       a.href = url; a.download = 'ao3h-hidden-tags-groups.json';
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
@@ -900,9 +881,9 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
     reload();
   }
-  /* ------------------------- /Hidden Tags Manager -------------------------- */
+  // ------------------------- /Hidden Tags Manager --------------------------
 
-  // ---- processing ----
+  // ----- Processing -----
   async function processList(){
     if (!enabled) return;
     const hiddenList = await getHidden();
@@ -924,30 +905,23 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
     });
   }
 
-  // ---- public API ----
+  // ----- Public run -----
   function run(){
     if (!enabled) return;
     ensureInlineIcons();
     processList();
   }
 
-  // --- module definition ---
+  // ----- Module definition & registration -----
   const MOD = { id: 'HideByTags' };
   MOD.init = async (flags)=>{
     enabled = !!flags.hideByTags;
 
     onReady(() => {
+      // Always listen for manager opener (core menu fires this)
       document.addEventListener(`${NS}:open-hide-manager`, openManager);
 
-      if (typeof GM_registerMenuCommand === 'function') {
-        GM_registerMenuCommand('AO3 Helper: Manage hidden tags…', openManager);
-        GM_registerMenuCommand('AO3 Helper: Show hidden tags', async ()=> {
-          const list = await getHidden();
-          console.log('[AO3H] Hidden tags (canonical):', list);
-          alert(`Hidden tags (${list.length}):\n\n${list.join('\n') || '(none)'}`);
-        });
-      }
-
+      // React to flag toggles
       document.addEventListener(`${NS}:flags-updated`, async () => {
         const f = await getFlags();
         const wasEnabled = enabled;
@@ -967,6 +941,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
         }
       });
 
+      // Initial state
       if (enabled){
         attachDelegatesOnce();
         run();
