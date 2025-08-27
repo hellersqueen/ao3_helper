@@ -2,55 +2,9 @@
 ;(function () {
   'use strict';
 
-  const AO3H = window.AO3H || {};
-  const { env:{ NS } = {}, util = {}, flags } = AO3H;
-  const { onReady, on, css } = util || {};
-  const { getFlags } = flags || {};
-
-  if (!NS || !onReady || !on || !css || !getFlags) {
-    console.error('[AO3H][HideFanficWithNotes] core not ready');
-    return;
-  }
-
   const MOD_ID  = 'HideFanficWithNotes';
   const DB_NAME = 'hiddenWorksDB';
   const STORE   = 'works';
-
-  /* ------------------------------ Styles ------------------------------ */
-  css`
-    .custom-hide-button { position: relative; float: right; margin-right: 10px; top: -25px; }
-    .hide { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px; background: #f0f0f0; border-radius: 5px; }
-    .hide .hideleft { width: 85%; font-size: 0.9em; line-height: 1.2em; margin-right: 10px; }
-    .hide .hideright { display: flex; gap: 6px; }
-    li.blurb { padding: 5px 5px; }
-
-    /* ===== Quick-Note Picker (centered, single-click to save) ===== */
-    #${NS}-m5-picker{
-      position: fixed; z-index: 99999;
-      min-width: 280px; max-width: 420px;
-      background: #fff; border: 1px solid #d0d0d0; border-radius: 10px;
-      box-shadow: 0 10px 28px rgba(0,0,0,.18); padding: 12px; display: none;
-      font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:#222;
-      left: 50%; top: 50%; transform: translate(-50%, -50%);
-    }
-    #${NS}-m5-picker.${NS}-open{ display:block; }
-    #${NS}-m5-picker .${NS}-m5p-title{ font-weight:600; margin-bottom:6px; }
-    #${NS}-m5-picker .${NS}-m5p-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 10px; }
-    #${NS}-m5-picker .${NS}-m5p-chip{
-      border:1px solid #c7c7c7; border-radius:999px; padding:4px 10px; cursor:pointer;
-      user-select:none; background:#fafafa;
-    }
-    #${NS}-m5-picker .${NS}-m5p-row{ display:flex; gap:8px; }
-    #${NS}-m5-picker input[type="text"]{
-      flex:1; padding:6px 8px; border:1px solid #cfcfcf; border-radius:6px;
-    }
-    #${NS}-m5-picker button{
-      border:1px solid #bdbdbd; background:#f6f6f6; border-radius:6px; padding:6px 10px; cursor:pointer;
-    }
-    #${NS}-m5-picker button:hover{ background:#efefef; }
-    #${NS}-m5-picker .${NS}-m5p-hint{ font-size:12px; color:#666; margin-top:8px; }
-    #${NS}-m5-picker .${NS}-bar{ display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
-  `;
 
   /* -------------------------- IndexedDB helpers -------------------------- */
   let db;
@@ -95,24 +49,24 @@
   /* ------------------------------ UI helpers ------------------------------ */
   function workIdFromBlurb(jQblurb) {
     const href = jQblurb.find('.header .heading a:first').attr('href') || '';
-    return href.replace(/(#.*|\?.*)$/, ''); // normalize
+    return href.replace(/(#.*|\?.*)$/, '');
   }
 
-  // User-editable quick chips (stored in localStorage)
   const USER_QUICK_TAGS_DEFAULT = [
-    'crossover', 'sequel', 'bad summary', 'parent/dad', 'unfinished',
-    'growing up together', 'not sterek focused', '1rst pov', 'established', 'always-a-girl'
+    'crossover','sequel','bad summary','parent/dad','unfinished',
+    'growing up together','not sterek focused','1rst pov','established','always-a-girl'
   ];
-  const QUICK_TAGS_KEY = `${NS}:m5QuickTagsUser`;
-  function getUserQuickTags(){
+
+  function m5_quickTags(NS){
+    const KEY = `${NS}:m5QuickTagsUser`;
     try {
-      const v = JSON.parse(localStorage.getItem(QUICK_TAGS_KEY) || 'null');
+      const v = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (Array.isArray(v) && v.every(x => typeof x === 'string')) return v;
     } catch {}
     return USER_QUICK_TAGS_DEFAULT;
   }
 
-  async function m5_pickReasonCenteredMinimal(seedText = ''){
+  async function m5_pickReasonCenteredMinimal(NS, seedText = ''){
     let panel = document.getElementById(`${NS}-m5-picker`);
     if (!panel) {
       panel = document.createElement('div');
@@ -125,17 +79,14 @@
           <button type="button" class="${NS}-m5p-add">Add</button>
         </div>
         <div class="${NS}-m5p-hint">Tip: click a tag to save immediately • Press Esc to cancel • Enter = Add</div>
-        <div class="${NS}-bar">
-          <button type="button" class="${NS}-m5p-cancel">Cancel</button>
-        </div>
-      `;
+        <div class="${NS}-bar"><button type="button" class="${NS}-m5p-cancel">Cancel</button></div>`;
       document.body.appendChild(panel);
     }
 
-    // fill chips
+    // chips
     const chipsWrap = panel.querySelector(`.${NS}-m5p-chips`);
     chipsWrap.innerHTML = '';
-    for (const tag of getUserQuickTags()) {
+    for (const tag of m5_quickTags(NS)) {
       const chip = document.createElement('span');
       chip.className = `${NS}-m5p-chip`;
       chip.textContent = tag;
@@ -143,9 +94,9 @@
       chipsWrap.appendChild(chip);
     }
 
-    const input     = panel.querySelector(`.${NS}-m5p-input`);
-    const addBtn    = panel.querySelector(`.${NS}-m5p-add`);
-    const cancelBtn = panel.querySelector(`.${NS}-m5p-cancel`);
+    const input  = panel.querySelector(`.${NS}-m5p-input`);
+    const addBtn = panel.querySelector(`.${NS}-m5p-add`);
+    const cancel = panel.querySelector(`.${NS}-m5p-cancel`);
 
     input.value = seedText || '';
 
@@ -161,42 +112,20 @@
     };
 
     addBtn.onclick = onAdd;
-    cancelBtn.onclick = onCancel;
+    cancel.onclick = onCancel;
 
     panel.classList.add(`${NS}-open`);
     input.focus();
     document.addEventListener('keydown', onKey, true);
 
-    let resolver;
-    const p = new Promise(r => resolver = r);
+    let resolveP;
+    const p = new Promise(r => resolveP = r);
     function finish(result){
       panel.classList.remove(`${NS}-open`);
       document.removeEventListener('keydown', onKey, true);
-      resolver(result);
+      resolveP(result);
     }
     return p;
-  }
-
-  function ensureHideButton(jQ, jQblurb) {
-    if (jQblurb.find('.custom-hide-button').length) return;
-    const btn = document.createElement('button');
-    btn.textContent = 'Hide';
-    btn.className   = 'custom-hide-button';
-    jQblurb.find('.header').append(btn);
-
-    btn.addEventListener('click', async () => {
-      const workId = workIdFromBlurb(jQblurb);
-      try {
-        const existing = await getWork(workId);
-        let reason = await m5_pickReasonCenteredMinimal(existing && existing.reason ? existing.reason : '');
-        if (reason === null) return; // cancelled
-        reason = String(reason).trim();
-        if (!reason) return;
-
-        hideWork(jQ, jQblurb[0], reason);
-        await putWork({ workId, reason, isHidden: true });
-      } catch (e) { console.error('[AO3H] hide click failed', e); }
-    });
   }
 
   function hideWork(jQ, blurbEl, reason) {
@@ -216,10 +145,9 @@
     jQblurb.children(':not(.hide)').css('display', 'none');
     jQblurb.find('.custom-hide-button').hide();
   }
-
   function showWork(jQ, blurbEl) {
     const jQblurb = jQ(blurbEl);
-    jQblurb.children(':not(.hide)').show(); // temporary reveal
+    jQblurb.children(':not(.hide)').show();
     jQblurb.find('.hide').remove();
     jQblurb.find('.custom-hide-button').show();
   }
@@ -244,7 +172,6 @@
       alert('Export failed. See console for details.');
     }
   }
-
   async function importHiddenWorksFromFile(file) {
     try {
       const text   = await file.text();
@@ -271,7 +198,6 @@
       alert('Import failed. See console for details.');
     }
   }
-
   function promptImportHiddenWorks() {
     const input = document.createElement('input');
     input.type = 'file';
@@ -282,17 +208,9 @@
     input.click();
   }
 
-  // Expose for your menu dialog (menu.js uses these)
-  window.ao3hExportHiddenWorks  = exportHiddenWorks;
-  window.ao3hImportHiddenWorks  = promptImportHiddenWorks;
-
-  // Also add optional Tampermonkey context menu items
-  try {
-    if (typeof GM_registerMenuCommand !== 'undefined') {
-      GM_registerMenuCommand('Export hidden works (JSON)', exportHiddenWorks);
-      GM_registerMenuCommand('Import hidden works (JSON)', promptImportHiddenWorks);
-    }
-  } catch {}
+  // expose for menu.js
+  window.ao3hExportHiddenWorks = exportHiddenWorks;
+  window.ao3hImportHiddenWorks = promptImportHiddenWorks;
 
   /* ----------------------- Legacy localStorage -> IDB ---------------------- */
   async function transferFromLocalStorage() {
@@ -312,23 +230,68 @@
 
   /* --------------------------------- init --------------------------------- */
   async function init(initialFlags) {
+    const AO3H = window.AO3H || {};
+    const { env:{ NS } = {}, util = {} } = AO3H;
+    const { onReady, on, css } = util || {};
+    if (!NS || !onReady || !on || !css) { console.error('[AO3H][HideFanficWithNotes] core not ready'); return; }
+
     const enabled = !!(initialFlags && initialFlags.hideFanficWithNotes);
     if (!enabled) return;
     if (!/\/works\b/.test(location.pathname)) return;
 
-    // AO3 / jQuery available thanks to @require
+    // inject styles now (after core is guaranteed ready)
+    css`
+      .custom-hide-button { position: relative; float: right; margin-right: 10px; top: -25px; }
+      .hide { display:flex; align-items:center; justify-content:space-between; padding:5px 10px; background:#f0f0f0; border-radius:5px; }
+      .hide .hideleft { width:85%; font-size:0.9em; line-height:1.2em; margin-right:10px; }
+      .hide .hideright { display:flex; gap:6px; }
+      li.blurb { padding:5px 5px; }
+      #${NS}-m5-picker{ position:fixed; z-index:99999; min-width:280px; max-width:420px; background:#fff; border:1px solid #d0d0d0; border-radius:10px;
+        box-shadow:0 10px 28px rgba(0,0,0,.18); padding:12px; display:none; font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:#222;
+        left:50%; top:50%; transform:translate(-50%,-50%); }
+      #${NS}-m5-picker.${NS}-open{ display:block; }
+      #${NS}-m5-picker .${NS}-m5p-title{ font-weight:600; margin-bottom:6px; }
+      #${NS}-m5-picker .${NS}-m5p-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 10px; }
+      #${NS}-m5-picker .${NS}-m5p-chip{ border:1px solid #c7c7c7; border-radius:999px; padding:4px 10px; cursor:pointer; user-select:none; background:#fafafa; }
+      #${NS}-m5-picker .${NS}-m5p-row{ display:flex; gap:8px; }
+      #${NS}-m5-picker input[type="text"]{ flex:1; padding:6px 8px; border:1px solid #cfcfcf; border-radius:6px; }
+      #${NS}-m5-picker button{ border:1px solid #bdbdbd; background:#f6f6f6; border-radius:6px; padding:6px 10px; cursor:pointer; }
+      #${NS}-m5-picker button:hover{ background:#efefef; }
+      #${NS}-m5-picker .${NS}-m5p-hint{ font-size:12px; color:#666; margin-top:8px; }
+      #${NS}-m5-picker .${NS}-bar{ display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
+    `;
+
     const jQ = window.jQuery;
     if (!jQ) { console.error('[AO3H] jQuery missing'); return; }
 
     if (!db) await openDB();
     await transferFromLocalStorage();
 
-    // initial pass: buttons + re-hide persisted
+    // buttons + re-hide persisted
     const all = await getAllWorks();
     jQ('ol.index li.blurb').each((_, el) => {
       const jQb = jQ(el);
       const id  = workIdFromBlurb(jQb);
-      ensureHideButton(jQ, jQb);
+
+      // add button if needed
+      if (jQb.find('.custom-hide-button').length === 0) {
+        const btn = document.createElement('button');
+        btn.textContent = 'Hide';
+        btn.className   = 'custom-hide-button';
+        jQb.find('.header').append(btn);
+        btn.addEventListener('click', async () => {
+          try {
+            const existing = await getWork(id);
+            let reason = await m5_pickReasonCenteredMinimal(NS, existing && existing.reason ? existing.reason : '');
+            if (reason === null) return;
+            reason = String(reason).trim();
+            if (!reason) return;
+            hideWork(jQ, el, reason);
+            await putWork({ workId: id, reason, isHidden: true });
+          } catch (e) { console.error('[AO3H] hide click failed', e); }
+        });
+      }
+
       const rec = all.find(r => r.workId === id);
       if (rec && rec.isHidden) hideWork(jQ, el, rec.reason);
     });
@@ -338,7 +301,7 @@
       const blurbEl = jQ(this).closest('li')[0];
       const jQb = jQ(blurbEl);
       const id  = workIdFromBlurb(jQb);
-      showWork(jQ, blurbEl); // temporary reveal; DB unchanged
+      showWork(jQ, blurbEl);
       try { await getWork(id); } catch (e) { console.error('[AO3H] show failed', e); }
     });
 
@@ -361,8 +324,8 @@
       const id       = workIdFromBlurb(jQb);
       const jQreason = jQ(this).closest('.hide').find('.reason-text');
       const current  = jQreason.text();
-      const nextPicked = await m5_pickReasonCenteredMinimal(current || '');
-      if (nextPicked === null) return; // cancelled
+      const nextPicked = await m5_pickReasonCenteredMinimal(NS, current || '');
+      if (nextPicked === null) return;
       const next = String(nextPicked).trim();
       if (!next) return;
       jQreason.text(next);
@@ -376,6 +339,13 @@
   }
 
   /* ----------------------- Register in module registry --------------------- */
-  AO3H.modules = AO3H.modules || {};
-  AO3H.modules[MOD_ID] = { id: MOD_ID, title: 'Hide Fanfic (with notes)', init };
+  const MOD = { id: MOD_ID, title: 'Hide Fanfic (with notes)', init };
+  if (window.AO3H && typeof window.AO3H.register === 'function') {
+    window.AO3H.register(MOD);
+  } else {
+    // safe fallback if core hasn’t defined register yet
+    window.AO3H = window.AO3H || {};
+    window.AO3H.modules = window.AO3H.modules || {};
+    window.AO3H.modules[MOD_ID] = MOD;
+  }
 })();
