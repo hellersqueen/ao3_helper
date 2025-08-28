@@ -241,14 +241,10 @@
 
   /* --------------------------------- init --------------------------------- */
   async function init(initialFlags) {
-    const AO3H = window.AO3H || {};
-    const { env:{ NS } = {}, util = {} } = AO3H;
-    const { onReady, on, css } = util || {};
-    if (!NS || !onReady || !on || !css) { console.error('[AO3H][HideFanficWithNotes] core not ready'); return; }
-
     const enabled = !!(initialFlags && initialFlags.hideFanficWithNotes);
     if (!enabled) return;
     if (!/\/works\b/.test(location.pathname)) return;
+
 
     // inject styles now (after core is guaranteed ready)
     css`
@@ -277,7 +273,7 @@
 
     if (!db) await openDB();
     await transferFromLocalStorage();
-
+    
     // buttons + re-hide persisted
     const all = await getAllWorks();
     jQ('ol.index li.blurb').each((_, el) => {
@@ -352,17 +348,13 @@
    /* ----------------------- Register in module registry --------------------- */
   const MOD = { id: MOD_ID, title: 'Hide Fanfic (with notes)', init };
 
-  // Use the same global as core (handles TM sandbox + race conditions)
-  const T = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+    const T = window;               // <- match core.js
   T.AO3H = T.AO3H || {};
-
   if (typeof T.AO3H.register === 'function') {
-    // Core (or its stub) is ready → register now
     T.AO3H.register(MOD);
   } else {
-    // Core not ready yet → push to a pending queue that core will flush
     T.AO3H.__pending = T.AO3H.__pending || [];
-    // finalRegister accepts a single object with .id, so [MOD] is fine
     T.AO3H.__pending.push([MOD]);
   }
+
 })();
