@@ -2,12 +2,12 @@
 ;(function () {
   'use strict';
 
-  const W   = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const W    = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const AO3H = W.AO3H || {};
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
   const css  = AO3H.util && AO3H.util.css;
 
-  // Access flags functions at call-time
+  // Read flags at call-time (core may not be ready immediately)
   const getFlagsNow = () =>
     (W.AO3H.flags && typeof W.AO3H.flags.getFlags === 'function')
       ? W.AO3H.flags.getFlags()
@@ -18,9 +18,16 @@
       ? W.AO3H.flags.setFlag(k, v)
       : Promise.reject(new Error('flags not ready'));
 
+  /* ---------- Hidden Works Import/Export chooser (used by HideFanficWithNotes) ---------- */
   function ensureHiddenWorksChooser(){
-    if (!css) return;
+    if (!css) return; // need core css helper
     if (document.getElementById('ao3h-ie-dialog')) return;
+
+    // If body isn't available yet, defer
+    if (!document.body) {
+      document.addEventListener('DOMContentLoaded', ensureHiddenWorksChooser, { once: true });
+      return;
+    }
 
     css`
       #ao3h-ie-dialog::backdrop { background: rgba(0,0,0,.35); }
@@ -61,6 +68,7 @@
     `;
     document.body.appendChild(dlg);
 
+    // Hooks provided by the HideFanficWithNotes module (safe fallbacks)
     dlg.querySelector('#ao3h-ie-export').addEventListener('click', () => {
       (W.ao3hExportHiddenWorks || (() => alert('Export not available — the Hide Notes module is not loaded')))();
       dlg.close();
@@ -71,6 +79,7 @@
     });
     dlg.querySelector('#ao3h-ie-cancel').addEventListener('click', () => dlg.close());
 
+    // Close on backdrop click
     dlg.addEventListener('click', (e) => {
       const r = dlg.getBoundingClientRect();
       const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
@@ -78,9 +87,10 @@
     });
   }
 
-  // Create or get the menu shell (root <li>, toggle <span>, and <ul> menu)
+  /* --------------------------------- Menu shell --------------------------------- */
   function ensureMenuShell(){
     if (!css) return null;
+    if (!document.body) return null; // body required
 
     css`
       .${NS}-navlink{
@@ -97,9 +107,7 @@
     `;
 
     let li = document.querySelector(`li.${NS}-root`);
-    if (li) {
-      return { li, menu: li.querySelector(`ul.${NS}-menu`) };
-    }
+    if (li) return { li, menu: li.querySelector(`ul.${NS}-menu`) };
 
     li = document.createElement('li');
     li.className = `dropdown ${NS}-root`;
@@ -129,6 +137,7 @@
     toggle.addEventListener('click', (e)=>{ e.preventDefault(); li.classList.contains(`${NS}-open`) ? closeMenu() : openMenu(); });
     document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
+    // Attach in header if possible, else float bottom-right
     const navUL =
       document.querySelector('ul.primary.navigation.actions') ||
       document.querySelector('#header .primary.navigation ul') ||
@@ -145,7 +154,7 @@
     return { li, menu };
   }
 
-  // Ensure a single toggle row exists (create if missing, update checked state)
+  /* ------------------------------- Toggle rows ------------------------------- */
   function ensureToggle(menu, flags, label, key, hint){
     let row = menu.querySelector(`a[data-flag="${key}"]`);
     if (!row) {
@@ -166,21 +175,27 @@
     row.setAttribute('aria-checked', String(on));
   }
 
-  // Build or update the menu contents
+  /* ------------------------- Build / Update the menu ------------------------- */
   async function buildOrUpdateMenu(){
+    // Body must exist before inserting DOM
+    if (!document.body) {
+      document.addEventListener('DOMContentLoaded', buildOrUpdateMenu, { once: true });
+      return;
+    }
+
     const flags = (await getFlagsNow()) || {};
     const shell = ensureMenuShell();
     if (!shell) return;
     const { menu } = shell;
 
-    // Toggles
+    // Toggles (add/update)
     ensureToggle(menu, flags, 'Save scroll position',     'saveScroll');
     ensureToggle(menu, flags, 'Chapter word count',       'chapterWordCount');
     ensureToggle(menu, flags, 'Hide works by tags',       'hideByTags');
-    ensureToggle(menu, flags, 'Hide fanfic (with notes)', 'hideFanficWithNotes'); // <-- the new one
+    ensureToggle(menu, flags, 'Hide fanfic (with notes)', 'hideFanficWithNotes'); // new one
     ensureToggle(menu, flags, 'Auto filter',              'autoSearchFilters');
 
-    // Manager link (once)
+    // Hidden Tags Manager (once)
     if (!menu.querySelector(`[data-action="manage-hidden-tags"]`)) {
       const liM = document.createElement('li');
       const a = document.createElement('a');
@@ -213,7 +228,7 @@
       menu.appendChild(liE);
     }
 
-    // Single toggle handler (delegated)
+    // Delegated click handler for toggles (bind once)
     if (!menu.__ao3h_bound) {
       menu.addEventListener('click', async (e)=>{
         const a = e.target.closest('a[data-flag]'); if (!a) return;
@@ -235,13 +250,14 @@
     }
   }
 
-  // Re-sync on flag changes
+  /* --------------------------------- Wiring --------------------------------- */
+  // Re-sync when flags change (e.g., toggled by other code)
   document.addEventListener(`${NS}:flags-updated`, buildOrUpdateMenu);
 
-  // Build when core announces flags ready
-  document.addEventListener(`${NS}:boot-flags-ready`, () => buildOrUpdateMenu());
+  // Main build when core announces flags are ready
+  document.addEventListener(`${NS}:boot-flags-ready`, buildOrUpdateMenu);
 
-  // Also try an immediate build (works if core already ran)
+  // Try an immediate build (works if core already booted)
   buildOrUpdateMenu();
 
 })();
