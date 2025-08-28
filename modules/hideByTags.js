@@ -4,11 +4,15 @@
 
   const AO3H = window.AO3H || {};
   const { env:{ NS } = {}, util = {}, flags } = AO3H;
+  // pull Storage from util
   const { onReady, $, $$, on, debounce, observe, css, Storage } = util || {};
   const { getFlags } = flags || {};
   if (!NS || !onReady || !$ || !$$ || !on || !debounce || !observe || !css || !Storage || !getFlags) {
     console.error('[AO3H][HideByTags] core not ready'); return;
   }
+
+  // ... keep the rest of the file the same ...
+
 
   const MOD_ID = 'HideByTags';
 
