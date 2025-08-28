@@ -3,17 +3,30 @@
 
   const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const AO3H = W.AO3H || {};
-  const { env:{ NS } = {}, util:{ css } = {}, flags:{ getFlags, setFlag } = {} } = AO3H;
-  if (!NS || !css || !getFlags || !setFlag) {
-    console.error('[AO3H][menu] core not ready'); return;
+  const NS  = (AO3H.env && AO3H.env.NS) || 'ao3h';
+  const css = AO3H.util && AO3H.util.css;
+
+  // Access flags functions at call-time (avoid capturing undefined too early)
+  const getFlagsNow = () =>
+    (W.AO3H.flags && typeof W.AO3H.flags.getFlags === 'function')
+      ? W.AO3H.flags.getFlags()
+      : Promise.resolve(null);
+
+  const setFlagNow = (k, v) =>
+    (W.AO3H.flags && typeof W.AO3H.flags.setFlag === 'function')
+      ? W.AO3H.flags.setFlag(k, v)
+      : Promise.reject(new Error('flags not ready'));
+
+  if (!css) {
+    console.error('[AO3H][menu] core CSS helper not ready'); 
+    // We still attach listeners below so we can build later.
   }
 
-
-  // --- Import/Export chooser used by Module 5 (optional) ---
+  // --- Import/Export chooser used by HideFanficWithNotes (optional) ---
   function ensureHiddenWorksChooser(){
     if (document.getElementById('ao3h-ie-dialog')) return;
 
-    css`
+    css && css`
       #ao3h-ie-dialog::backdrop { background: rgba(0,0,0,.35); }
       #ao3h-ie-dialog {
         border: 1px solid #bfc7cf; border-radius: 10px; padding: 16px 16px 14px;
@@ -52,18 +65,16 @@
     `;
     document.body.appendChild(dlg);
 
-    // If Module 5 is not present yet, these show a friendly alert.
     dlg.querySelector('#ao3h-ie-export').addEventListener('click', () => {
-      (window.ao3hExportHiddenWorks || (() => alert('Export not available — the Hide Notes module is not loaded')))();
+      (W.ao3hExportHiddenWorks || (() => alert('Export not available — the Hide Notes module is not loaded')))();
       dlg.close();
     });
     dlg.querySelector('#ao3h-ie-import').addEventListener('click', () => {
-      (window.ao3hImportHiddenWorks || (() => alert('Import not available — the Hide Notes module is not loaded')))();
+      (W.ao3hImportHiddenWorks || (() => alert('Import not available — the Hide Notes module is not loaded')))();
       dlg.close();
     });
     dlg.querySelector('#ao3h-ie-cancel').addEventListener('click', () => dlg.close());
 
-    // Close if we click on the backdrop area
     dlg.addEventListener('click', (e) => {
       const r = dlg.getBoundingClientRect();
       const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
@@ -72,6 +83,8 @@
   }
 
   function buildSettingsUI(flags){
+    if (!css) return; // wait until css helper exists
+
     css`
       .${NS}-navlink{
         color:#fff; text-decoration:none; padding:.5em .8em;
@@ -102,7 +115,6 @@
     menu.className = `menu dropdown-menu ${NS}-menu`;
     menu.setAttribute('role', 'menu');
 
-    // Helper to create a toggle item
     function item(label, key, hint){
       const li = document.createElement('li');
       const a = document.createElement('a');
@@ -111,21 +123,21 @@
       a.dataset.flag = key;
       a.innerHTML = `
         <span class="${NS}-label">${label}</span>
-        <span class="${NS}-state">${flags[key] ? '✓' : ''}</span>
+        <span class="${NS}-state">${flags && flags[key] ? '✓' : ''}</span>
         ${hint ? `<span class="${NS}-kbd">${hint}</span>` : ''}`;
-      a.setAttribute('aria-checked', String(!!flags[key]));
+      a.setAttribute('aria-checked', String(!!(flags && flags[key])));
       li.appendChild(a);
       return li;
     }
 
-    // Your 4 toggles
-    menu.appendChild(item('Save scroll position',   'saveScroll'));
-    menu.appendChild(item('Chapter word count',     'chapterWordCount'));
-    menu.appendChild(item('Hide works by tags',     'hideByTags'));
-    menu.appendChild(item('Hide fanfic (with notes)', 'hideFanficWithNotes'));
-    menu.appendChild(item('Auto filter',            'autoSearchFilters'));
+    // Toggles (now includes Hide fanfic with notes)
+    menu.appendChild(item('Save scroll position',        'saveScroll'));
+    menu.appendChild(item('Chapter word count',          'chapterWordCount'));
+    menu.appendChild(item('Hide works by tags',          'hideByTags'));
+    menu.appendChild(item('Hide fanfic (with notes)',    'hideFanficWithNotes'));
+    menu.appendChild(item('Auto filter',                 'autoSearchFilters'));
 
-    // Hidden Tags Manager (handled by hideByTags.js when it listens to this event)
+    // Hidden Tags Manager
     {
       const liM = document.createElement('li');
       const a = document.createElement('a');
@@ -140,7 +152,7 @@
       menu.appendChild(liM);
     }
 
-    // Hidden works Import/Export (optional; works if Module 5 exists)
+    // Hidden works Import/Export (used by HideFanficWithNotes)
     {
       ensureHiddenWorksChooser();
       const liE = document.createElement('li');
@@ -174,7 +186,6 @@
     toggle.addEventListener('click', (e)=>{ e.preventDefault(); li.classList.contains(`${NS}-open`) ? closeMenu() : openMenu(); });
     document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
-    // Try typical AO3 navs; if not found, float it bottom-right
     const navUL =
       document.querySelector('ul.primary.navigation.actions') ||
       document.querySelector('#header .primary.navigation ul') ||
@@ -188,33 +199,49 @@
       document.body.appendChild(floater);
     }
 
-    // Toggle handler
+    // Toggle handler (resolve flags funcs at click-time)
     menu.addEventListener('click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
       const key = a.dataset.flag;
-      const f = await getFlags();
+
+      const f = await getFlagsNow();
+      if (!f) return; // core still not ready
+
       const next = !f[key];
-      await setFlag(key, next);
+      try { await setFlagNow(key, next); } catch {}
       a.querySelector(`.${NS}-state`).textContent = next ? '✓' : '';
       a.setAttribute('aria-checked', String(next));
+
       document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`));
     });
 
     // Keep menu in sync when flags change elsewhere
     document.addEventListener(`${NS}:flags-updated`, async ()=>{
-      const f = await getFlags();
+      const f = await getFlagsNow();
+      if (!f) return;
       menu.querySelectorAll('a[data-flag]').forEach(a=>{
         const k = a.dataset.flag, on = !!f[k];
-        a.querySelector(`.${NS}-state`).textContent = on ? '✓' : '';
+        const state = a.querySelector(`.${NS}-state`);
+        if (state) state.textContent = on ? '✓' : '';
         a.setAttribute('aria-checked', String(on));
       });
     });
   }
 
-  // Build menu after core announces flags ready
+  // Build when core announces flags ready…
   document.addEventListener(`${NS}:boot-flags-ready`, (e) => {
     try { buildSettingsUI(e.detail || {}); }
-    catch (err) { console.error('[AO3H][menu] build failed', err); }
+    catch (err) { console.error('[AO3H][menu] build failed (event path)', err); }
   });
+
+  // …and also try immediately in case this file loads after the event fired
+  (async () => {
+    try {
+      const f = await getFlagsNow();
+      if (f) buildSettingsUI(f);
+    } catch (err) {
+      // ignore; core will fire the event later
+    }
+  })();
 })();
