@@ -122,6 +122,7 @@
     menu.appendChild(item('Save scroll position',   'saveScroll'));
     menu.appendChild(item('Chapter word count',     'chapterWordCount'));
     menu.appendChild(item('Hide works by tags',     'hideByTags'));
+    menu.appendChild(item('Hide fanfic (with notes)', 'hideFanficWithNotes'));
     menu.appendChild(item('Auto filter',            'autoSearchFilters'));
 
     // Hidden Tags Manager (handled by hideByTags.js when it listens to this event)
