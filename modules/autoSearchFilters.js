@@ -1,26 +1,32 @@
-;(function(){
+// modules/autoSearchFilters.js
+;(function () {
   'use strict';
-  const { onReady, observe, debounce } = AO3H.util;
-  const { getFlags } = AO3H.flags;
-  const NS = AO3H.env.NS || 'ao3h';
 
-  const WORDS_FROM = '5000', COMPLETE = 'T', LANG = 'en';
+  const MOD = { id: 'AutoSearchFilters', title: 'Auto Search Filters (5k+ • Complete • EN)' };
+
+  // Desired defaults
+  const WORDS_FROM = '5000';
+  const COMPLETE   = 'T';
+  const LANG       = 'en';
 
   function isWorksLikePath(p){
     return /^\/works\/?$/.test(p) || /^\/tags\/[^/]+\/works\/?$/.test(p);
   }
-  function scopeKeyFromLocation(loc=location){
+
+  function scopeKeyFromLocation(loc=location, NS='ao3h'){
     const m = loc.pathname.match(/^\/tags\/([^/]+)\/works\/?$/);
     if (m) return `${NS}:autoFilters:applied:tag:${m[1]}`;
     if (/^\/works\/?$/.test(loc.pathname)) return `${NS}:autoFilters:applied:works`;
     return `${NS}:autoFilters:applied:${loc.pathname}`;
   }
+
   function urlHasDesiredParams(u){
     const sp = u.searchParams;
     return sp.get('work_search[words_from]')===WORDS_FROM
         && sp.get('work_search[complete]')===COMPLETE
         && sp.get('work_search[language_id]')===LANG;
   }
+
   function findFilterForm(){
     const forms = Array.from(document.querySelectorAll('form')).filter(f=>{
       try{
@@ -30,6 +36,7 @@
     });
     return forms[0] || document.querySelector('#work-filters form') || null;
   }
+
   function setCoreFilterValues(form){
     // words_from
     let words = form.querySelector('input[name="work_search[words_from]"]');
@@ -54,45 +61,59 @@
       langHidden.value = LANG;
     }
   }
+
   function ensurePageOneWhenSubmitting(form){
     let page = form.querySelector('input[name="page"]');
     if(!page){ page = document.createElement('input'); page.type='hidden'; page.name='page'; form.appendChild(page); }
     page.value = '1';
   }
+
   function requestSubmit(form){
     if (typeof form.requestSubmit === 'function') form.requestSubmit();
     else form.submit();
   }
-  function applyOncePerScope(){
-    const u = new URL(location.href);
-    const have = urlHasDesiredParams(u);
-    const form = findFilterForm();
-    if(!form) return;
-    if (form.__ao3h_autofilter_done) return;
 
-    const scopeKey = scopeKeyFromLocation(u);
-    const already = sessionStorage.getItem(scopeKey) === '1';
+  // init is called by core; only here we touch AO3H/util safely
+  MOD.init = async (initialFlags) => {
+    const A = window.AO3H || {};
+    const { util = {}, flags: flagsAPI = {}, env = {} } = A;
+    const { onReady, observe, debounce } = util || {};
+    const { getFlags } = flagsAPI || {};
+    const NS = env.NS || 'ao3h';
 
-    if (have){
-      sessionStorage.setItem(scopeKey, '1');
+    if (!onReady || !observe || !debounce || !getFlags) {
+      console.error('[AO3H][AutoSearchFilters] core not ready');
       return;
     }
-    if (!already){
-      form.__ao3h_autofilter_done = true;
-      setCoreFilterValues(form);
-      ensurePageOneWhenSubmitting(form);
-      sessionStorage.setItem(scopeKey, '1');
-      requestAnimationFrame(()=> requestSubmit(form));
-    }
-  }
-  function run(){
-    if (!isWorksLikePath(location.pathname)) return;
-    applyOncePerScope();
-  }
+    if (!initialFlags || !initialFlags.autoSearchFilters) return;
 
-  const MOD = { id: 'AutoSearchFilters' };
-  MOD.init = async (flags)=>{
-    if (!flags.autoSearchFilters) return;
+    function applyOncePerScope(){
+      const u = new URL(location.href);
+      if (!isWorksLikePath(u.pathname)) return;
+
+      const have = urlHasDesiredParams(u);
+      const form = findFilterForm();
+      if(!form) return;
+      if (form.__ao3h_autofilter_done) return;
+
+      const scopeKey = scopeKeyFromLocation(u, NS);
+      const already  = sessionStorage.getItem(scopeKey) === '1';
+
+      if (have){
+        sessionStorage.setItem(scopeKey, '1');
+        return;
+      }
+      if (!already){
+        form.__ao3h_autofilter_done = true;
+        setCoreFilterValues(form);
+        ensurePageOneWhenSubmitting(form);
+        sessionStorage.setItem(scopeKey, '1');
+        requestAnimationFrame(()=> requestSubmit(form));
+      }
+    }
+
+    const run = () => applyOncePerScope();
+
     onReady(run);
     observe(document.body, debounce(run, 300));
     document.addEventListener(`${NS}:flags-updated`, async ()=>{
@@ -100,5 +121,18 @@
       if (f.autoSearchFilters) run();
     });
   };
-  AO3H.register(MOD);
+
+  // Robust registration: prefer AO3H.register, else queue, else direct map
+  (function registerSafely(mod){
+    const G = (window.AO3H = window.AO3H || {});
+    if (typeof G.register === 'function') {
+      try { G.register(mod); return; } catch {}
+    }
+    if (Array.isArray(G.__pending)) {
+      G.__pending.push([mod]);
+    }
+    G.modules = G.modules || {};
+    G.modules[mod.id] = mod;
+  })(MOD);
+
 })();
