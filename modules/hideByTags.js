@@ -32,6 +32,17 @@
 
   // ---- styles (fold/cut + inline icon + Manager panel + toast + commas) ----
   css`
+  css`
+/* Classic manager minimal styles */
+.${NS}-mgr-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.${NS}-btn{ border:1px solid #cfd6e4; background:#f5f7fb; border-radius:8px; padding:6px 10px; cursor:pointer; font-size:12px; }
+.${NS}-btn:hover{ background:#ecf1f8; }
+.${NS}-input{ flex:1; border:1px solid #cfd6e4; border-radius:8px; padding:6px 10px; font-size:13px; }
+.${NS}-list{ display:grid; gap:6px; margin-top:8px; }
+.${NS}-pill{ display:flex; align-items:center; justify-content:space-between; gap:10px;
+  border:1px solid #e6e8ee; background:#fff; border-radius:10px; padding:6px 10px; }
+`;
+
 /* ===================== FOLD / CUT ===================== */
 .${NS}-fold {
   position: relative;
