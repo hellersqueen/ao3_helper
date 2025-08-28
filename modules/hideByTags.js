@@ -30,9 +30,8 @@
     return toCanon(tag);
   }
 
-  // ---- styles (fold/cut + inline icon + Manager panel + toast + commas) ----
-  css`
-  css`
+// ---- styles (fold/cut + inline icon + Manager panel + toast + commas) ----
+css`
 /* Classic manager minimal styles */
 .${NS}-mgr-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .${NS}-btn{ border:1px solid #cfd6e4; background:#f5f7fb; border-radius:8px; padding:6px 10px; cursor:pointer; font-size:12px; }
@@ -41,7 +40,6 @@
 .${NS}-list{ display:grid; gap:6px; margin-top:8px; }
 .${NS}-pill{ display:flex; align-items:center; justify-content:space-between; gap:10px;
   border:1px solid #e6e8ee; background:#fff; border-radius:10px; padding:6px 10px; }
-`;
 
 /* ===================== FOLD / CUT ===================== */
 .${NS}-fold {
@@ -80,83 +78,61 @@
 .${NS}-force-show { display:list-item !important; }
 
 /* ===================== INLINE HIDE ICON ===================== */
-/* Par défaut: pas d’espace réservé */
 a.tag.${NS}-tag-wrap{
   position: relative;
-  padding-right: 0;                 /* pas d’espace quand pas survolé */
-  overflow: visible;                /* l’icône reste visible quand montrée */
-  transition: padding-right .12s;   /* (optionnel) adoucir l’apparition */
+  padding-right: 0;
+  overflow: visible;
+  transition: padding-right .12s;
 }
-
-/* Au hover/focus: on AJOUTE l’espace qui va CONTENIR l’icône */
 a.tag.${NS}-tag-wrap:hover,
 a.tag.${NS}-tag-wrap:focus-visible,
 ul.commas li:hover > a.tag.${NS}-tag-wrap,
 ol.commas li:hover > a.tag.${NS}-tag-wrap,
 .commas   li:hover > a.tag.${NS}-tag-wrap{
-  padding-right: 1.4em;             /* espace suffisant pour l’icône */
+  padding-right: 1.4em;
 }
-
-/* L’icône est DEDANS le lien (dans l’espace ajouté) */
 .${NS}-hide-ico{
   position: absolute;
-  right: .2em;                      /* bord droit du lien (dans le padding) */
+  right: .2em;
   top: 50%;
   transform: translateY(-50%);
   width: 1em; height: 1em; line-height: 1em;
   text-align: center; font-size: .9em;
   border: 1px solid #bbb; border-radius: 50%;
   background: #fff;
-  opacity: 0; pointer-events: none; /* invisible et non cliquable par défaut */
+  opacity: 0; pointer-events: none;
   transition: opacity .15s, transform .15s;
   z-index: 2;
 }
-
-/* On ne rend l’icône cliquable que lorsqu’elle est visible */
 a.tag.${NS}-tag-wrap:hover .${NS}-hide-ico,
 a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
   opacity: 1; pointer-events: auto;
 }
-.${NS}-hide-ico:hover{
-  transform: translateY(-50%) scale(1.06);
-}
+.${NS}-hide-ico:hover{ transform: translateY(-50%) scale(1.06); }
 
-/* Empêche la virgule AO3 d’être orpheline (reste collée au tag) */
+/* AO3 commas handling */
 ul.commas li,
 ol.commas li,
-.commas li{
-  white-space: nowrap;
-}
+.commas li{ white-space: nowrap; }
 
-/* ——— Réduire la taille du texte des tags (et des virgules AO3) ——— */
 ul.commas li > a.tag.${NS}-tag-wrap,
 ol.commas li > a.tag.${NS}-tag-wrap,
 .commas   li > a.tag.${NS}-tag-wrap{
-  font-size: 0.92em;      /* ← ajuste: 0.85–0.98 selon tes goûts */
-  line-height: 1.15;      /* un peu plus serré (optionnel) */
+  font-size: 0.92em;
+  line-height: 1.15;
 }
-
-/* Assortir la taille des virgules générées par AO3 */
 ul.commas li::after,
 ol.commas li::after,
-.commas   li::after{
-  font-size: 0.92em;      /* doit matcher la valeur au-dessus */
-}
+.commas   li::after{ font-size: 0.92em; }
 
-/* (optionnel) L’icône suit la taille du tag */
-a.tag.${NS}-tag-wrap .${NS}-hide-ico{
-  font-size: 0.9em;       /* relatif au tag, ajuste si besoin */
-}
+a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
 /* ===================== MANAGER PANEL (ULTRA-LIGHT) ===================== */
 .${NS}-mgr-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999998; }
 .${NS}-mgr {
-  position:fixed;
-  top:10vh; left:50%; transform:translateX(-50%);
-  background:#fff; color:#000;
-  border:1px solid #e5e7eb; border-radius:12px;
-  padding:10px; z-index:999999;
-  box-shadow:0 16px 40px rgba(2,15,35,.12);
+  position:fixed; top:10vh; left:50%; transform:translateX(-50%);
+  background:#fff; color:#000; border:1px solid #e5e7eb; border-radius:12px;
+  padding:10px; z-index:999999; box-shadow:0 16px 40px rgba(2,15,35,.12);
   font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   display:grid; gap:8px; max-height: 82vh; overflow: auto;
 }
@@ -164,17 +140,13 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 
 /* Head: search + count */
 .${NS}-ul-head { display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
-.${NS}-ul-search {
-  border-radius: 8px; border:1px solid #cfd6e4; background:#fff;
-  padding: 6px 10px; font-size:12px;
-}
+.${NS}-ul-search { border-radius: 8px; border:1px solid #cfd6e4; background:#fff; padding: 6px 10px; font-size:12px; }
 .${NS}-ul-count { font-weight:600; font-size:12px; color:#4b5563; }
 
 /* Actions */
 .${NS}-ul-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
 .${NS}-ul-btn {
-  height: 28px; padding: 0 10px;
-  border-radius: 8px; border:1px solid #cfd6e4; background:#f5f7fb;
+  height: 28px; padding: 0 10px; border-radius: 8px; border:1px solid #cfd6e4; background:#f5f7fb;
   font-size:12px; cursor:pointer; transition: background .15s, transform .12s, border-color .15s;
 }
 .${NS}-ul-btn:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
@@ -182,7 +154,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 /* List area */
 .${NS}-ul-list { display:grid; gap:8px; max-height:none; overflow:visible; padding-right:2px; }
 
-/* ===================== EXPANDABLE GROUPS ===================== */
+/* Expandable groups */
 .${NS}-ul-group {
   border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px;
   display: flex; flex-direction: column; min-height: 25px;
@@ -193,26 +165,13 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 }
 .${NS}-ul-ghead:hover { background: rgba(0,0,0,.04); }
 .${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
-
-.${NS}-ul-chevron {
-  display:inline-block; width:10px; min-width:10px; height:10px;
-  transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px;
-}
+.${NS}-ul-chevron { display:inline-block; width:10px; min-width:10px; height:10px; transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px; }
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(90deg); }
-
-.${NS}-ul-glabel {
-  font-weight:650; font-size:12px; color:#1f2937; line-height:25px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:-8px; margin-left:-15px;
-}
+.${NS}-ul-glabel { font-weight:650; font-size:12px; color:#1f2937; line-height:25px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:-8px; margin-left:-15px; }
 
 /* Collapsible content */
-.${NS}-ul-gwrap {
-  overflow:hidden; max-height:0;
-  transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease;
-}
-.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-gwrap {
-  max-height:1200px; border-top: 1px dashed #e7ebf5;
-}
+.${NS}-ul-gwrap { overflow:hidden; max-height:0; transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease; }
+.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-gwrap { max-height:1200px; border-top: 1px dashed #e7ebf5; }
 
 /* Rows */
 .${NS}-ul-gwrap { display:grid; gap:6px; }
@@ -242,7 +201,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 .${NS}-ul-del { background:#fff6f6; border-color:#f2c9c9; }
 .${NS}-ul-del:hover { background:#ffecec; border-color:#e9b3b3; }
 
-/* ===================== TOAST ===================== */
+/* Toast */
 .${NS}-toast {
   position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
   background: rgba(0,0,0,.75); color: #fff;
@@ -251,7 +210,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
   opacity: 0; transition: opacity .15s ease; pointer-events: none;
 }
 
-/* ===================== MINI GROUP PICKER ===================== */
+/* Mini group picker */
 .${NS}-gp-pop {
   position: absolute; z-index: 1000000;
   min-width: 180px; max-width: 260px; max-height: 50vh; overflow: auto;
@@ -261,35 +220,25 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 }
 .${NS}-gp-head { font-weight: 600; margin-bottom: 4px; text-align:center; }
 .${NS}-gp-list { display: grid; gap: 4px; }
-.${NS}-gp-item {
-  display: flex; justify-content: space-between;
-  padding: 4px 6px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer;
-}
+.${NS}-gp-item { display: flex; justify-content: space-between; padding: 4px 6px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; }
 .${NS}-gp-item:hover { background: #f4f6f9; }
 .${NS}-gp-input { width: 90%; margin-top: 6px; padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px;}
 .${NS}-gp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
-.${NS}-gp-btn {
-  padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6; cursor: pointer; font-size: 11px;
-}
+.${NS}-gp-btn { padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6; cursor: pointer; font-size: 11px; }
 .${NS}-gp-btn:hover { background:#e9ecf0; }
 
-/* ===================== RESPONSIVE ===================== */
+/* Responsive */
 @media (max-width: 720px){
   .${NS}-ul-head { grid-template-columns: 1fr; }
   .${NS}-ul-actions { justify-content:flex-start; }
 }
 
-/* === AO3 commas: notre gestion, pour éviter la virgule orpheline === */
-
-/* 0) désactiver la virgule générée par AO3 UNIQUEMENT là où on gère nous-mêmes */
+/* AO3 commas: disable native comma where we manage our own */
 .${NS}-own-commas li::after { content: "" !important; }
+/* Our comma inside the <a> */
+a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35em; }
+`;
 
-/* 1) la virgule que nous insérons dans le <a> */
-a.tag.${NS}-tag-wrap .${NS}-tag-comma {
-  text-decoration: none; /* pas soulignée */
-  margin-right: .35em;   /* espace après la virgule */
-}
-  `;
   /* --------------------------- CORE MATCHING -------------------------- */
   function isListPage(){
     return Routes.isWorksIndex?.() || Routes.isSearch?.() || /^\/tags\/[^/]+\/works/.test(location.pathname);
