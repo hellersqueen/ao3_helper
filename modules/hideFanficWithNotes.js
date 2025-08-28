@@ -1,6 +1,17 @@
 // modules/hideFanficWithNotes.js
 ;(function () {
   'use strict';
+  // Use the same global as core (important for Tampermonkey)
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const AO3H = W.AO3H || {};
+  const { env:{ NS } = {}, util = {}, flags } = AO3H;
+  const { onReady, on, css } = util || {};
+  const { getFlags } = flags || {};
+
+  if (!NS || !onReady || !on || !css || !getFlags) {
+    console.error('[AO3H][HideFanficWithNotes] core not ready');
+    return;
+  }
 
   const MOD_ID  = 'HideFanficWithNotes';
   const DB_NAME = 'hiddenWorksDB';
@@ -338,14 +349,20 @@
     });
   }
 
-  /* ----------------------- Register in module registry --------------------- */
+   /* ----------------------- Register in module registry --------------------- */
   const MOD = { id: MOD_ID, title: 'Hide Fanfic (with notes)', init };
-  if (window.AO3H && typeof window.AO3H.register === 'function') {
-    window.AO3H.register(MOD);
+
+  // Use the same global as core (handles TM sandbox + race conditions)
+  const T = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  T.AO3H = T.AO3H || {};
+
+  if (typeof T.AO3H.register === 'function') {
+    // Core (or its stub) is ready → register now
+    T.AO3H.register(MOD);
   } else {
-    // safe fallback if core hasn’t defined register yet
-    window.AO3H = window.AO3H || {};
-    window.AO3H.modules = window.AO3H.modules || {};
-    window.AO3H.modules[MOD_ID] = MOD;
+    // Core not ready yet → push to a pending queue that core will flush
+    T.AO3H.__pending = T.AO3H.__pending || [];
+    // finalRegister accepts a single object with .id, so [MOD] is fine
+    T.AO3H.__pending.push([MOD]);
   }
 })();
