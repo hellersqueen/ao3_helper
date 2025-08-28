@@ -1,16 +1,16 @@
-// modules/saveScroll.js
 ;(function(){
   'use strict';
 
-  const AO3H = window.AO3H || {};
-  const { env:{ NS } = {}, util = {}, flags } = AO3H;
-  // NOTE: Storage lives under util.Storage (core exports it that way)
-  const { onReady, on, throttle, Storage } = util || {};
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const AO3H = W.AO3H || {};
+  const { env:{ NS } = {}, util = {}, store: Storage, flags } = AO3H;
+  const { onReady, on, throttle } = util || {};
   const { getFlags } = flags || {};
 
   if (!Storage || !onReady || !on || !throttle || !getFlags || !NS) {
     console.error('[AO3H][SaveScroll] core not ready'); return;
   }
+
 
   const MOD_ID = 'SaveScroll';
 
