@@ -1,17 +1,14 @@
-// modules/hideByTags.js
 ;(function () {
   'use strict';
 
-  const AO3H = window.AO3H || {};
-  const { env:{ NS } = {}, util = {}, flags } = AO3H;
-  // pull Storage from util
-  const { onReady, $, $$, on, debounce, observe, css, Storage } = util || {};
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const AO3H = W.AO3H || {};
+  const { env:{ NS } = {}, util = {}, store: Storage, flags } = AO3H;
+  const { onReady, $, $$, on, debounce, observe, css } = util || {};
   const { getFlags } = flags || {};
   if (!NS || !onReady || !$ || !$$ || !on || !debounce || !observe || !css || !Storage || !getFlags) {
     console.error('[AO3H][HideByTags] core not ready'); return;
   }
-
-  // ... keep the rest of the file the same ...
 
 
   const MOD_ID = 'HideByTags';
