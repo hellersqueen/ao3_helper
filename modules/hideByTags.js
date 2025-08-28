@@ -416,10 +416,10 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
   /* ----------------------- INLINE 🚫 ON TAG LINKS ---------------------- */
   function decorateTags(root=document){
     $$('.tag', root).forEach(tag => {
-      if (tag.closest(`.${NS}-tag-wrap`)) return; // already decorated (if a previous pass wrapped)
+      if (tag.querySelector(`.${NS}-hide-ico`)) return;
       tag.classList.add(`${NS}-tag-wrap`);
       const ico = document.createElement('span');
-      ico.className = `${NS}-ban`;
+      ico.className = `${NS}-hide-ico`;
       ico.title = 'Hide this tag';
       ico.textContent = '🚫';
       ico.setAttribute('role', 'button');
