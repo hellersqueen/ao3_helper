@@ -1,4 +1,4 @@
-/* menu.js — AO3 Helper header menu + Import/Export + settings root */
+/* menu.js — AO3 Helper header menu + Import/Export + settings root (safe, lazy dialog) */
 ;(function(){
   'use strict';
 
@@ -12,7 +12,6 @@
 
   /* ============================== STYLES ============================== */
   css`
-  /* top-level nav item (looks like a label, not a link) */
   .${NS}-navlink{
     color:#fff; text-decoration:none; padding:.5em .8em; display:inline-block;
     transition:background-color .2s; cursor:default; pointer-events:none;
@@ -25,7 +24,6 @@
   .${NS}-menu a{ display:flex; justify-content:space-between; align-items:center; }
   .${NS}-kbd{ font-size:12px; color:#666; margin-left:1rem; }
 
-  /* settings modal */
   .${NS}-settings-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999997; display:none; }
   .${NS}-settings-backdrop.${NS}-open{ display:block; }
   .${NS}-settings{
@@ -43,22 +41,12 @@
   .${NS}-settings-root{ padding:12px 14px; }
   `;
 
-  /* ===================== IMPORT/EXPORT CHOOSER DIALOG ===================== */
- function ensureHiddenWorksChooser(){
-  // If it already exists, we're done.
-  if (document.getElementById(`${NS}-ie-dialog`)) return true;
+  /* ===================== IMPORT/EXPORT CHOOSER (SAFE) ===================== */
+  // Build only when needed; append to <body> if present, else to <html>.
+  function ensureHiddenWorksChooser(){
+    if (document.getElementById(`${NS}-ie-dialog`)) return true;
 
-  // If <body> isn't ready yet, try again later.
-  if (!document.body) {
-    // Schedule a one-time retry at DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', () => ensureHiddenWorksChooser(), { once: true });
-    // Also schedule a short fallback retry, in case DOMContentLoaded already fired
-    setTimeout(() => document.body && ensureHiddenWorksChooser(), 200);
-    return false;
-  }
-
-  // --- Styles ---
-  css`
+    css`
     #${NS}-ie-dialog::backdrop { background: rgba(0,0,0,.35); }
     #${NS}-ie-dialog{
       border:1px solid #bfc7cf; border-radius:10px; padding:16px 16px 14px;
@@ -76,49 +64,47 @@
       padding:6px 10px; border-radius:8px; border:1px solid #ccc; background:#f7f7f7; cursor:pointer; font-size:12px;
     }`;
 
-  // --- Dialog DOM ---
-  const dlg = document.createElement('dialog');
-  dlg.id = `${NS}-ie-dialog`;
-  dlg.innerHTML = `
-    <form method="dialog" style="margin:0">
-      <h3 id="${NS}-ie-title">Hidden works</h3>
-      <p id="${NS}-ie-desc">Choose what you want to do with your hidden-works list.</p>
-      <div id="${NS}-ie-row">
-        <button type="button" id="${NS}-ie-export">Export JSON</button>
-        <button type="button" id="${NS}-ie-import">Import JSON</button>
-      </div>
-      <div id="${NS}-ie-foot">
-        <button id="${NS}-ie-cancel">Close</button>
-      </div>
-    </form>
-  `;
-  document.body.appendChild(dlg);
+    const dlg = document.createElement('dialog');
+    dlg.id = `${NS}-ie-dialog`;
+    dlg.innerHTML = `
+      <form method="dialog" style="margin:0">
+        <h3 id="${NS}-ie-title">Hidden works</h3>
+        <p id="${NS}-ie-desc">Choose what you want to do with your hidden-works list.</p>
+        <div id="${NS}-ie-row">
+          <button type="button" id="${NS}-ie-export">Export JSON</button>
+          <button type="button" id="${NS}-ie-import">Import JSON</button>
+        </div>
+        <div id="${NS}-ie-foot">
+          <button id="${NS}-ie-cancel">Close</button>
+        </div>
+      </form>
+    `;
 
-  // Buttons -> global helpers
-  const get = (id)=> document.getElementById(id);
-  get(`${NS}-ie-export`).addEventListener('click', () => {
-    (W.ao3hExportHiddenWorks || (()=>alert('Exporter not loaded yet')))();
-    dlg.close();
-  });
-  get(`${NS}-ie-import`).addEventListener('click', () => {
-    (W.ao3hImportHiddenWorks || (()=>alert('Importer not loaded yet')))();
-    dlg.close();
-  });
-  get(`${NS}-ie-cancel`).addEventListener('click', () => dlg.close());
+    const parent = document.body || document.documentElement;
+    if (!parent) return false; // caller will retry soon
+    parent.appendChild(dlg);
 
-  // Backdrop click closes
-  dlg.addEventListener('click', (e) => {
-    const r = dlg.getBoundingClientRect();
-    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    if (!inside) dlg.close();
-  });
+    const get = (id)=> document.getElementById(id);
+    get(`${NS}-ie-export`).addEventListener('click', () => {
+      (W.ao3hExportHiddenWorks || (()=>alert('Exporter not loaded yet')))();
+      dlg.close();
+    });
+    get(`${NS}-ie-import`).addEventListener('click', () => {
+      (W.ao3hImportHiddenWorks || (()=>alert('Importer not loaded yet')))();
+      dlg.close();
+    });
+    get(`${NS}-ie-cancel`).addEventListener('click', () => dlg.close());
 
-  return true;
-}
+    dlg.addEventListener('click', (e) => {
+      const r = dlg.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) dlg.close();
+    });
 
+    return true;
+  }
 
   /* ============================ SETTINGS ROOT ============================ */
-  // A modal with an always-present content container that modules can mount into.
   let settingsBackdrop, settingsBox, settingsRoot;
   function buildSettingsModal(){
     if (settingsRoot) return settingsRoot;
@@ -152,11 +138,9 @@
     on(settingsBox.querySelector(`.${NS}-settings-close`), 'click', close);
     document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
 
-    // expose small API for menu item
     settingsBox.__ao3h_open = open;
     return settingsRoot;
   }
-
   function openSettingsModal(){
     if (!settingsBox) buildSettingsModal();
     settingsBox.__ao3h_open();
@@ -164,7 +148,7 @@
 
   /* ============================== HEADER MENU ============================== */
   function buildMenu(flags){
-    if (document.querySelector(`li.${NS}-root`)) return; // already built
+    if (document.querySelector(`li.${NS}-root`)) return;
 
     const li = document.createElement('li');
     li.className = `dropdown ${NS}-root`;
@@ -179,7 +163,6 @@
     menu.className = `menu dropdown-menu ${NS}-menu`;
     menu.setAttribute('role', 'menu');
 
-    // helper to build a checkbox-like item
     function item(label, key, hint){
       const li = document.createElement('li');
       const a = document.createElement('a');
@@ -195,14 +178,13 @@
       return li;
     }
 
-    // feature toggles
     menu.appendChild(item('Save scroll position', 'saveScroll'));
     menu.appendChild(item('Chapter word count', 'chapterWordCount'));
     menu.appendChild(item('Hide works by tags', 'hideByTags'));
     menu.appendChild(item('Auto filter (5k+, complete, EN)', 'autoSearchFilters'));
     menu.appendChild(item('Hide Fanfic (with notes)', 'hideFanficWithNotes'));
 
-    // Manage hidden tags (opens manager UI provided by the module)
+    // Manage hidden tags…
     {
       const mli = document.createElement('li');
       const a = document.createElement('a');
@@ -212,25 +194,38 @@
       menu.appendChild(mli);
     }
 
-    // Hidden works… (Import/Export chooser)
+    // Hidden works… (lazy create the chooser dialog)
     {
-      ensureHiddenWorksChooser();
       const mli = document.createElement('li');
       const a = document.createElement('a');
       a.href = '#';
       a.innerHTML = `<span>Hidden works…</span><span class="${NS}-kbd">Import / Export</span>`;
+
       on(a, 'click', (e)=>{
         e.preventDefault();
-        const dlg = document.getElementById(`${NS}-ie-dialog`);
-        if (!dlg) { alert('Chooser dialog not found'); return; }
-        try { dlg.showModal(); } catch { dlg.setAttribute('open',''); }
-        closeMenu();
+
+        const openDlg = () => {
+          const dlg = document.getElementById(`${NS}-ie-dialog`);
+          if (!dlg) return;
+          try { dlg.showModal(); } catch { dlg.setAttribute('open',''); }
+          closeMenu();
+        };
+
+        let ok = ensureHiddenWorksChooser();
+        if (!ok) {
+          const tryOpen = () => { if (ensureHiddenWorksChooser()) openDlg(); };
+          document.addEventListener('DOMContentLoaded', tryOpen, { once:true });
+          setTimeout(tryOpen, 200);
+          return;
+        }
+        openDlg();
       });
+
       mli.appendChild(a);
       menu.appendChild(mli);
     }
 
-    // Settings… (opens shared settings root modal for modules)
+    // Settings…
     {
       const mli = document.createElement('li');
       const a = document.createElement('a');
@@ -240,13 +235,9 @@
       menu.appendChild(mli);
     }
 
-    // attach to DOM
     li.append(toggle, menu);
 
-    // keyboard focusability
     li.tabIndex = 0;
-
-    // open/close behaviors
     function openMenu(){ li.classList.add('open'); toggle.setAttribute('aria-expanded','true'); }
     function closeMenu(){ li.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); }
 
@@ -258,7 +249,6 @@
     on(document, 'click', (e)=>{ if (!li.contains(e.target)) closeMenu(); });
     on(document, 'keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
-    // toggle handler
     on(menu, 'click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
@@ -270,17 +260,6 @@
       a.setAttribute('aria-checked', String(next));
     });
 
-    // react to external flag updates (other places may flip flags)
-    document.addEventListener(`${NS}:flags-updated`, async ()=>{
-      const f = await Flags.get();
-      menu.querySelectorAll('a[data-flag]').forEach(a=>{
-        const k = a.dataset.flag, on = !!f[k];
-        a.querySelector(`.${NS}-state`).textContent = on ? '✓' : '';
-        a.setAttribute('aria-checked', String(on));
-      });
-    });
-
-    // mount into AO3 header if possible; else float
     const navUL =
       $('ul.primary.navigation.actions') ||
       $('#header .primary.navigation ul') ||
@@ -298,26 +277,11 @@
 
   /* =============================== BOOT =============================== */
   onReady(async ()=>{
-    // Ensure modal exists early so modules can mount into it
-    const root = buildSettingsModal();
-    // Tell the core where modules should render their settings UIs
+    const root = (buildSettingsModal && buildSettingsModal()) || null;
     AO3H.provideSettingsRoot && AO3H.provideSettingsRoot(root);
-    // Also broadcast for any listeners waiting on menu readiness
     document.dispatchEvent(new CustomEvent(`${NS}:menu-ready`, { detail: { settingsRoot: root }}));
-
-    // Build the header menu with current flags
     const flags = await (Flags.get ? Flags.get() : Promise.resolve({}));
     buildMenu(flags);
-
-    // Make sure the Import/Export chooser is present even if built before core/util loaded
-    // When building the menu item:
-if (!ensureHiddenWorksChooser()) {
-  // If it couldn’t build yet, retry when core/menu signals readiness
-  document.addEventListener(`${NS}:register-ready`, ensureHiddenWorksChooser, { once:true });
-  document.addEventListener(`${NS}:boot-flags-ready`, ensureHiddenWorksChooser, { once:true });
-  document.addEventListener('DOMContentLoaded', ensureHiddenWorksChooser, { once:true });
-}
-
   });
 
 })();
