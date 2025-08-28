@@ -310,11 +310,14 @@
     buildMenu(flags);
 
     // Make sure the Import/Export chooser is present even if built before core/util loaded
-    if (!ensureHiddenWorksChooser()) {
-      // try again when core signalled readiness
-      document.addEventListener(`${NS}:register-ready`, ensureHiddenWorksChooser, { once:true });
-      document.addEventListener(`${NS}:boot-flags-ready`, ensureHiddenWorksChooser, { once:true });
-    }
+    // When building the menu item:
+if (!ensureHiddenWorksChooser()) {
+  // If it couldn’t build yet, retry when core/menu signals readiness
+  document.addEventListener(`${NS}:register-ready`, ensureHiddenWorksChooser, { once:true });
+  document.addEventListener(`${NS}:boot-flags-ready`, ensureHiddenWorksChooser, { once:true });
+  document.addEventListener('DOMContentLoaded', ensureHiddenWorksChooser, { once:true });
+}
+
   });
 
 })();
