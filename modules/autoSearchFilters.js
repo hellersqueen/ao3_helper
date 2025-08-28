@@ -1,24 +1,16 @@
 ;(function(){
   'use strict';
 
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-  const AO3H = W.AO3H || {};
-  const { util = {}, flags = {}, env:{ NS='ao3h' } = {} } = AO3H;
-  const { onReady, observe, debounce } = util;
-  const { getFlags } = flags;
+  // Always use the same global as core
+  const G = window;
 
-  if (!onReady || !observe || !debounce || !getFlags) {
-    // core not ready yet → still register module safely so core can init it later
-    safeRegister({ id:'AutoSearchFilters', init: ()=>{} });
-    return;
-  }
-
+  // Desired defaults
   const WORDS_FROM = '5000', COMPLETE = 'T', LANG = 'en';
 
   function isWorksLikePath(p){
     return /^\/works\/?$/.test(p) || /^\/tags\/[^/]+\/works\/?$/.test(p);
   }
-  function scopeKeyFromLocation(loc=location){
+  function scopeKeyFromLocation(NS, loc=location){
     const m = loc.pathname.match(/^\/tags\/([^/]+)\/works\/?$/);
     if (m) return `${NS}:autoFilters:applied:tag:${m[1]}`;
     if (/^\/works\/?$/.test(loc.pathname)) return `${NS}:autoFilters:applied:works`;
@@ -40,10 +32,12 @@
     return forms[0] || document.querySelector('#work-filters form') || null;
   }
   function setCoreFilterValues(form){
+    // words_from
     let words = form.querySelector('input[name="work_search[words_from]"]');
     if(!words){ words = document.createElement('input'); words.type='hidden'; words.name='work_search[words_from]'; form.appendChild(words); }
     words.value = WORDS_FROM;
 
+    // complete = T
     let rComp = form.querySelector('input[name="work_search[complete]"][value="T"]');
     if(rComp){ rComp.checked = true; }
     else {
@@ -52,6 +46,7 @@
       hidden.value = COMPLETE;
     }
 
+    // language = en
     let langSel = form.querySelector('select[name="work_search[language_id]"]');
     if(langSel){ langSel.value = LANG; }
     else {
@@ -69,37 +64,52 @@
     if (typeof form.requestSubmit === 'function') form.requestSubmit();
     else form.submit();
   }
-  function applyOncePerScope(){
-    const u = new URL(location.href);
-    const have = urlHasDesiredParams(u);
-    const form = findFilterForm();
-    if(!form) return;
-    if (form.__ao3h_autofilter_done) return;
 
-    const scopeKey = scopeKeyFromLocation(u);
-    const already = sessionStorage.getItem(scopeKey) === '1';
-
-    if (have){
-      sessionStorage.setItem(scopeKey, '1');
-      return;
-    }
-    if (!already){
-      form.__ao3h_autofilter_done = true;
-      setCoreFilterValues(form);
-      ensurePageOneWhenSubmitting(form);
-      sessionStorage.setItem(scopeKey, '1');
-      requestAnimationFrame(()=> requestSubmit(form));
-    }
-  }
-  function run(){
-    if (!isWorksLikePath(location.pathname)) return;
-    applyOncePerScope();
-  }
-
+  // Build the module
   const MOD = {
     id: 'AutoSearchFilters',
     init: async (flags)=>{
+      // Pull from AO3H *now* (core is ready when it calls init)
+      const A = G.AO3H || {};
+      const { env:{ NS='ao3h' } = {}, util={}, flags: F = {} } = A;
+      const { onReady, observe, debounce } = util;
+      const { getFlags } = F;
+
+      if (!onReady || !observe || !debounce || !getFlags) {
+        console.error('[AO3H][AutoSearchFilters] core util/flags missing at init');
+        return;
+      }
+
       if (!flags.autoSearchFilters) return;
+
+      function applyOncePerScope(){
+        const u = new URL(location.href);
+        const have = urlHasDesiredParams(u);
+        const form = findFilterForm();
+        if(!form) return;
+        if (form.__ao3h_autofilter_done) return;
+
+        const scopeKey = scopeKeyFromLocation(NS, u);
+        const already = sessionStorage.getItem(scopeKey) === '1';
+
+        if (have){
+          sessionStorage.setItem(scopeKey, '1');
+          return;
+        }
+        if (!already){
+          form.__ao3h_autofilter_done = true;
+          setCoreFilterValues(form);
+          ensurePageOneWhenSubmitting(form);
+          sessionStorage.setItem(scopeKey, '1');
+          requestAnimationFrame(()=> requestSubmit(form));
+        }
+      }
+
+      function run(){
+        if (!isWorksLikePath(location.pathname)) return;
+        applyOncePerScope();
+      }
+
       onReady(run);
       observe(document.body, debounce(run, 300));
       document.addEventListener(`${NS}:flags-updated`, async ()=>{
@@ -109,14 +119,14 @@
     }
   };
 
-  safeRegister(MOD);
-
-  function safeRegister(mod){
-    const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  // Safe registration against the same global as core (window)
+  (function safeRegister(mod){
     G.AO3H = G.AO3H || {};
-    if (typeof G.AO3H.register === 'function') { try { G.AO3H.register(mod); return; } catch {}
+    if (typeof G.AO3H.register === 'function') {
+      try { G.AO3H.register(mod); return; } catch {}
     }
     (G.AO3H.__pending = G.AO3H.__pending || []).push([mod]);
-    (G.AO3H.modules = G.AO3H.modules || {})[mod.id] = mod;
-  }
+    (G.AO3H.modules = G.AO3H.modules || {})[mod.id] = mod; // optional visibility
+  })(MOD);
+
 })();
