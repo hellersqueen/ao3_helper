@@ -7,7 +7,7 @@
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
   const css  = AO3H.util && AO3H.util.css;
 
-  // Access flags functions at call-time (avoid capturing undefined too early)
+  // Access flags functions at call-time
   const getFlagsNow = () =>
     (W.AO3H.flags && typeof W.AO3H.flags.getFlags === 'function')
       ? W.AO3H.flags.getFlags()
@@ -18,13 +18,8 @@
       ? W.AO3H.flags.setFlag(k, v)
       : Promise.reject(new Error('flags not ready'));
 
-  if (!css) {
-    console.warn('[AO3H][menu] css helper not ready yet — will build after boot event');
-  }
-
-  // --- Import/Export chooser used by HideFanficWithNotes (optional) ---
   function ensureHiddenWorksChooser(){
-    if (!css) return;                       // wait until css helper exists
+    if (!css) return;
     if (document.getElementById('ao3h-ie-dialog')) return;
 
     css`
@@ -83,8 +78,9 @@
     });
   }
 
-  function buildSettingsUI(flags){
-    if (!css) { console.warn('[AO3H][menu] css not ready at build time'); return; }
+  // Create or get the menu shell (root <li>, toggle <span>, and <ul> menu)
+  function ensureMenuShell(){
+    if (!css) return null;
 
     css`
       .${NS}-navlink{
@@ -100,10 +96,12 @@
       .${NS}-root.${NS}-open .${NS}-menu{ display:block; }
     `;
 
-    // Build once
-    if (document.querySelector(`li.${NS}-root`)) return;
+    let li = document.querySelector(`li.${NS}-root`);
+    if (li) {
+      return { li, menu: li.querySelector(`ul.${NS}-menu`) };
+    }
 
-    const li = document.createElement('li');
+    li = document.createElement('li');
     li.className = `dropdown ${NS}-root`;
     li.setAttribute('aria-haspopup', 'true');
 
@@ -116,62 +114,6 @@
     menu.className = `menu dropdown-menu ${NS}-menu`;
     menu.setAttribute('role', 'menu');
 
-    const makeItem = (label, key, hint) => {
-      const li = document.createElement('li');
-      const a  = document.createElement('a');
-      a.href = '#';
-      a.setAttribute('role', 'menuitemcheckbox');
-      a.dataset.flag = key;
-      a.innerHTML = `
-        <span class="${NS}-label">${label}</span>
-        <span class="${NS}-state">${flags && flags[key] ? '✓' : ''}</span>
-        ${hint ? `<span class="${NS}-kbd">${hint}</span>` : ''}`;
-      a.setAttribute('aria-checked', String(!!(flags && flags[key])));
-      li.appendChild(a);
-      return li;
-    };
-
-    // Toggles (includes your "Hide fanfic (with notes)")
-    menu.appendChild(makeItem('Save scroll position',       'saveScroll'));
-    menu.appendChild(makeItem('Chapter word count',         'chapterWordCount'));
-    menu.appendChild(makeItem('Hide works by tags',         'hideByTags'));
-    menu.appendChild(makeItem('Hide fanfic (with notes)',   'hideFanficWithNotes'));
-    menu.appendChild(makeItem('Auto filter',                'autoSearchFilters'));
-
-    // Manager for hidden tags
-    {
-      const liM = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = '#';
-      a.innerHTML = `<span>Manage hidden tags…</span>`;
-      a.addEventListener('click', (e)=> {
-        e.preventDefault();
-        document.dispatchEvent(new CustomEvent(`${NS}:open-hide-manager`));
-        closeMenu();
-      });
-      liM.appendChild(a);
-      menu.appendChild(liM);
-    }
-
-    // Hidden works import/export dialog
-    {
-      ensureHiddenWorksChooser();
-      const liE = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = '#';
-      a.innerHTML = `<span>Hidden works…</span><span class="${NS}-kbd">Import / Export</span>`;
-      a.addEventListener('click', (e)=> {
-        e.preventDefault();
-        const dlg = document.getElementById('ao3h-ie-dialog');
-        if (!dlg) return;
-        try { dlg.showModal(); } catch { dlg.setAttribute('open',''); }
-        closeMenu();
-      });
-      liE.appendChild(a);
-      menu.appendChild(liE);
-    }
-
-    // Attach to DOM
     li.appendChild(toggle);
     li.appendChild(menu);
     li.tabIndex = 0;
@@ -187,7 +129,6 @@
     toggle.addEventListener('click', (e)=>{ e.preventDefault(); li.classList.contains(`${NS}-open`) ? closeMenu() : openMenu(); });
     document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
-    // Place in AO3 nav if present; else float
     const navUL =
       document.querySelector('ul.primary.navigation.actions') ||
       document.querySelector('#header .primary.navigation ul') ||
@@ -201,45 +142,106 @@
       document.body.appendChild(floater);
     }
 
-    // Toggle handler
-    menu.addEventListener('click', async (e)=>{
-      const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
-      e.preventDefault();
-      try {
-        const f = (await getFlagsNow()) || {};
-        const key  = a.dataset.flag;
-        const next = !f[key];
-        await setFlagNow(key, next);
-        a.querySelector(`.${NS}-state`).textContent = next ? '✓' : '';
-        a.setAttribute('aria-checked', String(next));
-        document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`));
-      } catch (err) {
-        console.error('[AO3H][menu] toggle failed', err);
-        alert('AO3 Helper: flags not ready yet.');
-      }
-    });
-
-    // Keep menu in sync when flags change elsewhere
-    document.addEventListener(`${NS}:flags-updated`, async ()=>{
-      const f = (await getFlagsNow()) || {};
-      menu.querySelectorAll('a[data-flag]').forEach(a=>{
-        const k = a.dataset.flag, on = !!f[k];
-        a.querySelector(`.${NS}-state`).textContent = on ? '✓' : '';
-        a.setAttribute('aria-checked', String(on));
-      });
-    });
+    return { li, menu };
   }
 
-  // Build when core announces flags are ready
-  document.addEventListener(`${NS}:boot-flags-ready`, (e) => {
-    try { buildSettingsUI(e.detail || {}); }
-    catch (err) { console.error('[AO3H][menu] build failed on boot event', err); }
-  });
-
-  // Also attempt an immediate build if flags are already available
-  getFlagsNow().then(f => {
-    if (f) {
-      try { buildSettingsUI(f); } catch (err) { console.error('[AO3H][menu] immediate build failed', err); }
+  // Ensure a single toggle row exists (create if missing, update checked state)
+  function ensureToggle(menu, flags, label, key, hint){
+    let row = menu.querySelector(`a[data-flag="${key}"]`);
+    if (!row) {
+      const li = document.createElement('li');
+      row = document.createElement('a');
+      row.href = '#';
+      row.setAttribute('role', 'menuitemcheckbox');
+      row.dataset.flag = key;
+      row.innerHTML = `
+        <span class="${NS}-label">${label}</span>
+        <span class="${NS}-state"></span>
+        ${hint ? `<span class="${NS}-kbd">${hint}</span>` : ''}`;
+      li.appendChild(row);
+      menu.appendChild(li);
     }
-  });
+    const on = !!(flags && flags[key]);
+    row.querySelector(`.${NS}-state`).textContent = on ? '✓' : '';
+    row.setAttribute('aria-checked', String(on));
+  }
+
+  // Build or update the menu contents
+  async function buildOrUpdateMenu(){
+    const flags = (await getFlagsNow()) || {};
+    const shell = ensureMenuShell();
+    if (!shell) return;
+    const { menu } = shell;
+
+    // Toggles
+    ensureToggle(menu, flags, 'Save scroll position',     'saveScroll');
+    ensureToggle(menu, flags, 'Chapter word count',       'chapterWordCount');
+    ensureToggle(menu, flags, 'Hide works by tags',       'hideByTags');
+    ensureToggle(menu, flags, 'Hide fanfic (with notes)', 'hideFanficWithNotes'); // <-- the new one
+    ensureToggle(menu, flags, 'Auto filter',              'autoSearchFilters');
+
+    // Manager link (once)
+    if (!menu.querySelector(`[data-action="manage-hidden-tags"]`)) {
+      const liM = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#';
+      a.dataset.action = 'manage-hidden-tags';
+      a.innerHTML = `<span>Manage hidden tags…</span>`;
+      a.addEventListener('click', (e)=> {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent(`${NS}:open-hide-manager`));
+      });
+      liM.appendChild(a);
+      menu.appendChild(liM);
+    }
+
+    // Hidden works Import/Export (once)
+    if (!menu.querySelector(`[data-action="hidden-works-ie"]`)) {
+      ensureHiddenWorksChooser();
+      const liE = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#';
+      a.dataset.action = 'hidden-works-ie';
+      a.innerHTML = `<span>Hidden works…</span><span class="${NS}-kbd">Import / Export</span>`;
+      a.addEventListener('click', (e)=> {
+        e.preventDefault();
+        const dlg = document.getElementById('ao3h-ie-dialog');
+        if (!dlg) return;
+        try { dlg.showModal(); } catch { dlg.setAttribute('open',''); }
+      });
+      liE.appendChild(a);
+      menu.appendChild(liE);
+    }
+
+    // Single toggle handler (delegated)
+    if (!menu.__ao3h_bound) {
+      menu.addEventListener('click', async (e)=>{
+        const a = e.target.closest('a[data-flag]'); if (!a) return;
+        e.preventDefault();
+        try {
+          const f = (await getFlagsNow()) || {};
+          const key  = a.dataset.flag;
+          const next = !f[key];
+          await setFlagNow(key, next);
+          a.querySelector(`.${NS}-state`).textContent = next ? '✓' : '';
+          a.setAttribute('aria-checked', String(next));
+          document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`));
+        } catch (err) {
+          console.error('[AO3H][menu] toggle failed', err);
+          alert('AO3 Helper: flags not ready yet.');
+        }
+      });
+      menu.__ao3h_bound = true;
+    }
+  }
+
+  // Re-sync on flag changes
+  document.addEventListener(`${NS}:flags-updated`, buildOrUpdateMenu);
+
+  // Build when core announces flags ready
+  document.addEventListener(`${NS}:boot-flags-ready`, () => buildOrUpdateMenu());
+
+  // Also try an immediate build (works if core already ran)
+  buildOrUpdateMenu();
+
 })();
