@@ -1,11 +1,5 @@
 // core.js
-/* -------------------------------------------------------------
- * AO3 Helper — Core
- * - Safe early stub for AO3H.register (handles race conditions)
- * - Final register supports: register('ID', def) | register(defWithId) | register({ID: def, ...})
- * - Exposes tiny utils, storage, flags
- * - Boots all registered modules
- * ------------------------------------------------------------- */
+
 
 /* ===== EARLY STUB (runs immediately, before anything else) ===== */
 ;(function () {
@@ -73,6 +67,7 @@
     }
   };
   AO3H.util.Storage = Storage;
+  AO3H.store = AO3H.util.Storage;
 
   /* ======================
    * Small DOM utilities
