@@ -1,157 +1,103 @@
-/* -------------------------------------------------------------
- * AO3 Helper — Core
- * - Safe early stub for AO3H.register (handles race conditions)
- * - Final register supports: register('ID', def) | register(defWithId) | register({ID: def, ...})
- * - Exposes tiny utils, storage, flags
- * - Boots all registered modules
- * ------------------------------------------------------------- */
-
-/* ===== EARLY STUB (runs immediately) ===== */
-;(function () {
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-  W.AO3H = W.AO3H || {};
-  if (typeof W.AO3H.register !== 'function') {
-    const q = W.AO3H.__pending || (W.AO3H.__pending = []);
-    // queue any call shape: ('id', def) | (def) | ({ id: def, ... })
-    W.AO3H.register = function () {
-      if (arguments.length === 2) q.push([arguments[0], arguments[1]]);
-      else q.push([arguments[0]]);
-    };
-  }
-})();
-
-/* =========================== CORE IIFE =========================== */
-;(function () {
+/* core.js — AO3 Helper core (namespace, utils, flags, registry, boot) */
+;(function(){
   'use strict';
 
+  /* ========================== ENV & NAMESPACE ========================== */
+  const NS = 'ao3h';
+  const DEBUG = false;
   const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-  W.AO3H = W.AO3H || {};
-  const AO3H = W.AO3H;
 
-  // Environment / constants
-  AO3H.env     = AO3H.env     || { NS: 'ao3h', DEBUG: false };
-  AO3H.util    = AO3H.util    || {};
-  AO3H.flags   = AO3H.flags   || {};
-  AO3H.modules = AO3H.modules || {};
+  // public logger (quiet by default)
+  const dlog = (...a)=>{ if (DEBUG) console.log('[AO3H]', ...a); };
 
-  const { NS, DEBUG } = AO3H.env;
-
-  /* ====================== Logging ====================== */
-  function dlog(...a){ if (DEBUG) console.log('[AO3H]', ...a); }
-  AO3H.util.dlog = dlog;
-
-  /* ====================== Storage ====================== */
-  const Storage = {
-    key: (k) => `${NS}:${k}`,
-    async get(k, d=null){
-      try {
-        return (typeof GM_getValue === 'function')
-          ? await GM_getValue(Storage.key(k), d)
-          : (JSON.parse(localStorage.getItem(Storage.key(k))) ?? d);
-      } catch { return d; }
-    },
-    async set(k, v){
-      try {
-        if (typeof GM_setValue === 'function') return GM_setValue(Storage.key(k), v);
-        localStorage.setItem(Storage.key(k), JSON.stringify(v));
-      } catch {}
-      return v;
-    },
-    async del(k){
-      try {
-        if (typeof GM_deleteValue === 'function') return GM_deleteValue(Storage.key(k));
-        localStorage.removeItem(Storage.key(k));
-      } catch {}
-    }
-  };
-  AO3H.util.Storage = Storage;
-  AO3H.store = AO3H.util.Storage; // ← legacy alias used by some modules
-
-  /* ====================== DOM utils ====================== */
+  /* ============================== UTILITIES ============================ */
   const onReady = (fn) => (document.readyState === 'loading')
-    ? document.addEventListener('DOMContentLoaded', fn, { once:true })
+    ? document.addEventListener('DOMContentLoaded', fn, { once: true })
     : fn();
 
   const $  = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
-  const on = (el, evt, cb, opts) => el.addEventListener(evt, cb, opts);
+  const on = (el, evt, cb, opts) => el && el.addEventListener(evt, cb, opts);
 
-  const debounce = (fn,ms=200)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
-  const throttle = (fn,ms=200)=>{ let t=0; return (...a)=>{ const n=Date.now(); if (n-t>ms){ t=n; fn(...a); } }; };
+  const debounce = (fn, ms=200)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+  const throttle = (fn, ms=200)=>{ let t=0; return (...a)=>{ const n=Date.now(); if (n-t>ms){ t=n; fn(...a); } }; };
 
-  const observe = (root, cb, opts={childList:true,subtree:true}) => {
-    const mo = new MutationObserver(cb); mo.observe(root, opts); return mo;
-  };
-
+  // Safe CSS injector (works at @run-at document-start even if <head> isn't parsed yet)
   const css = (strings, ...vals) => {
     const text = strings.map((s,i)=>s+(vals[i]??'')).join('');
-    if (typeof GM_addStyle === 'function') {
-      GM_addStyle(`/* ${NS} */\n${text}`);
-    } else {
+    if (typeof W.GM_addStyle === 'function') {
+      W.GM_addStyle(`/* ${NS} */\n${text}`);
+      return;
+    }
+    const apply = () => {
       const el = document.createElement('style');
       el.textContent = `/* ${NS} */\n${text}`;
-      document.head.appendChild(el);
-    }
+      (document.head || document.documentElement).appendChild(el);
+    };
+    if (document.head) apply();
+    else document.addEventListener('DOMContentLoaded', apply, { once:true });
   };
 
-  AO3H.util.onReady  = onReady;
-  AO3H.util.$        = $;
-  AO3H.util.$$       = $$;
-  AO3H.util.on       = on;
-  AO3H.util.debounce = debounce;
-  AO3H.util.throttle = throttle;
-  AO3H.util.observe  = observe;
-  AO3H.util.css      = css;
+  // MutationObserver helper
+  const observe = (root, cb, opts={ childList:true, subtree:true }) => {
+    if (!root) return { disconnect(){/*noop*/} };
+    const mo = new MutationObserver(cb);
+    mo.observe(root, opts);
+    return mo;
+  };
 
-  AO3H.util.route = {
+  /* ============================== STORAGE ============================== */
+  // Prefer GM_* (Tampermonkey) with graceful fallback to localStorage.
+  const Storage = {
+    key: (k) => `${NS}:${k}`,
+    async get(k, d=null){
+      try {
+        if (typeof W.GM_getValue === 'function') return await W.GM_getValue(this.key(k), d);
+      } catch {}
+      try {
+        const raw = localStorage.getItem(this.key(k));
+        return raw == null ? d : JSON.parse(raw);
+      } catch { return d; }
+    },
+    async set(k, v){
+      try {
+        if (typeof W.GM_setValue === 'function') return W.GM_setValue(this.key(k), v);
+      } catch {}
+      try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch {}
+    },
+    async del(k){
+      try {
+        if (typeof W.GM_deleteValue === 'function') return W.GM_deleteValue(this.key(k));
+      } catch {}
+      try { localStorage.removeItem(this.key(k)); } catch {}
+    },
+  };
+
+  /* ============================== ROUTER =============================== */
+  const routes = {
     path: () => location.pathname,
     isWork: () => /^\/works\/\d+(?:\/chapters\/\d+)?$/.test(location.pathname),
     isWorkShow: () => /^\/works\/\d+$/.test(location.pathname),
-    isSearch: () => /^\/works$/.test(location.pathname) && (new URLSearchParams(location.search).has('work_search[query]') || location.search.includes('tag_id')),
     isChapter: () => /^\/works\/\d+\/chapters\/\d+$/.test(location.pathname),
     isBookmarks: () => /^\/users\/[^/]+\/bookmarks/.test(location.pathname),
+
+    // Works listing (search/index) — used by AutoSearchFilters & HideByTags
+    isWorksIndex: () => /^\/works\/?$/.test(location.pathname),
+    isSearch: () => {
+      if (!/^\/works\/?$/.test(location.pathname)) return false;
+      const qs = new URLSearchParams(location.search);
+      return qs.has('work_search[query]') || location.search.includes('tag_id');
+    },
   };
 
-  /* ====================== final register() ====================== */
-  function finalRegister(arg1, arg2) {
-    if (typeof arg1 === 'string') { AO3H.modules[arg1] = arg2; return; }
-    if (arg1 && typeof arg1 === 'object' && !arg2) {
-      if (typeof arg1.id === 'string' && arg1.id) { AO3H.modules[arg1.id] = arg1; return; }
-      for (const [k, v] of Object.entries(arg1)) {
-        if (v && typeof v === 'object') {
-          const id = (typeof v.id === 'string' && v.id) ? v.id : k;
-          AO3H.modules[id] = v;
-        } else {
-          AO3H.modules[k] = v;
-        }
-      }
-    }
-  }
-
-  // Swap stub → final, then flush queued calls
-  {
-    const pending = AO3H.__pending || [];
-    AO3H.register = finalRegister;
-    for (const args of pending) { try { finalRegister.apply(null, args); } catch (e) { console.error('[AO3H] queued register failed', e); } }
-    AO3H.__pending = []; // clear
-    document.dispatchEvent(new CustomEvent(`${NS}:register-ready`));
-  }
-
-  // Merge legacy window.ao3hModules, if present
-  if (W.ao3hModules && typeof W.ao3hModules === 'object') {
-    for (const [id, def] of Object.entries(W.ao3hModules)) {
-      try { finalRegister(id, def); } catch(e){ console.error('[AO3H] legacy merge failed', id, e); }
-    }
-  }
-
-  /* ====================== Flags ====================== */
+  /* ============================== FLAGS ================================ */
   const Defaults = {
     features: {
       saveScroll: true,
       chapterWordCount: true,
       hideByTags: true,
       autoSearchFilters: true,
-      hideFanficWithNotes: true
+      hideFanficWithNotes: true,
     }
   };
 
@@ -162,43 +108,145 @@
       return { ...Defaults.features };
     }
     const merged = { ...Defaults.features, ...saved };
-    try {
-      const same = JSON.stringify(merged) === JSON.stringify(saved);
-      if (!same) await Storage.set('flags', merged);
-    } catch {}
+    // Backfill if new defaults were added later
+    if (JSON.stringify(merged) !== JSON.stringify(saved)) await Storage.set('flags', merged);
     return merged;
   }
 
-  async function setFlag(key, val) {
+  async function setFlag(key, val){
     const flags = await getFlags();
     flags[key] = !!val;
     await Storage.set('flags', flags);
-    document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`, { detail: { key, value: !!val, flags } }));
+    // notify listeners (menu, modules)
+    document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`, { detail: flags }));
     return flags;
   }
 
-  AO3H.flags.getFlags = getFlags;
-  AO3H.flags.setFlag  = setFlag;
-  AO3H.flags.Defaults = Defaults;
+  /* =========================== MODULE REGISTRY ========================== */
+  // Modules call AO3H.register({ id, title, init, onFlagsUpdated?, defaultFlagKey? })
+  const _queue = [];
+  let _realRegistrarInstalled = false;
 
-  /* ====================== Boot ====================== */
-  (async function boot(){
-    try {
-      const f = await getFlags();
-      document.dispatchEvent(new CustomEvent(`${NS}:boot-flags-ready`, { detail: f }));
-      for (const [id, mod] of Object.entries(AO3H.modules)) {
-        try { await mod.init?.(f); }
-        catch (e) { console.error('[AO3H] init failed:', id || mod?.id || '(unknown)', e); }
+  function _getFlagForModule(flags, mod){
+    // Prefer explicit defaultFlagKey; else try to derive from id in a lenient way.
+    if (mod.defaultFlagKey && mod.defaultFlagKey in flags) return !!flags[mod.defaultFlagKey];
+    const guess = String(mod.id || '').charAt(0).toLowerCase() + String(mod.id || '').slice(1);
+    return (guess in flags) ? !!flags[guess] : true; // default ON if unknown
+  }
+
+  // Allow menu.js to provide a settings root element (mount point for per-module panels)
+  let _settingsRoot = null;
+  function provideSettingsRoot(el){
+    _settingsRoot = el || null;
+  }
+
+  function installRealRegistrar(){
+    if (_realRegistrarInstalled) return;
+    _realRegistrarInstalled = true;
+
+    // Replace stub with real function that stores modules and (if booted) can init them later if needed.
+    AO3H.register = (mod) => {
+      if (!mod || !mod.id) return;
+      _queue.push(mod);
+      dlog('registered module:', mod.id);
+    };
+
+    // Let dependents know register is ready
+    document.dispatchEvent(new CustomEvent(`${NS}:register-ready`));
+  }
+
+  /* =============================== BOOT ================================= */
+  // Build AO3H object early so other files can attach even before boot.
+  const AO3H = W.AO3H || (W.AO3H = {});
+  AO3H.env   = { NS, DEBUG };
+  AO3H.util  = AO3H.util  || { $, $$, on, onReady, debounce, throttle, css, observe };
+  AO3H.store = AO3H.store || Storage;
+  AO3H.routes= AO3H.routes|| routes;
+
+  // Temporary stub: queue modules until real registrar is installed
+  if (typeof AO3H.register !== 'function') {
+    AO3H.register = (mod) => { _queue.push(mod); };
+  }
+
+  // Flags API (menu.js uses these)
+  AO3H.flags = {
+    Defaults,
+    get: getFlags,
+    set: setFlag,
+  };
+
+  // Menu -> core hook to hand over a mount node for settings panels
+  AO3H.provideSettingsRoot = provideSettingsRoot;
+
+  // Optional: soft-navigation signal for modules that need to re-run on PJAX
+  AO3H.signalNavigated = () => {
+    document.dispatchEvent(new CustomEvent(`${NS}:navigated`));
+  };
+
+  installRealRegistrar();
+
+  // Main boot: wait for menu (optionally) to announce its mount, then init modules with flags
+  onReady(async () => {
+    const flags = await getFlags();
+
+    // Notify that flags are available very early (menu can read these)
+    document.dispatchEvent(new CustomEvent(`${NS}:boot-flags-ready`, { detail: flags }));
+
+    // If menu.js will provide a settings root, give it a moment to load and call AO3H.provideSettingsRoot(...)
+    let booted = false;
+
+    const initAll = async () => {
+      if (booted) return;
+      booted = true;
+
+      // Initialize each registered module
+      for (const mod of _queue) {
+        try {
+          const enabled = _getFlagForModule(flags, mod);
+          // Give modules a chance to mount settings panel inside the menu's container (if provided)
+          await Promise.resolve(mod.init && mod.init({ enabled, settingsRoot: _settingsRoot }));
+          dlog('init ->', mod.id, 'enabled=', enabled);
+        } catch (e) {
+          console.error(`[AO3H] Module init failed (${mod.id}):`, e);
+        }
       }
-      AO3H.util.on(document, `${NS}:flags-updated`, async () => {
-        const nf = await getFlags();
-        for (const [id, mod] of Object.entries(AO3H.modules)) {
-          try { mod.onFlagsUpdated?.(nf); } catch {}
+
+      // Wire global flag updates to module handlers
+      document.addEventListener(`${NS}:flags-updated`, async (e) => {
+        const f = e && e.detail ? e.detail : await getFlags();
+        for (const mod of _queue) {
+          try {
+            const enabled = _getFlagForModule(f, mod);
+            mod.onFlagsUpdated && mod.onFlagsUpdated({ enabled, settingsRoot: _settingsRoot });
+          } catch (err) {
+            console.error(`[AO3H] Module onFlagsUpdated failed (${mod.id}):`, err);
+          }
         }
       });
-    } catch (e) {
-      console.error('[AO3H] boot failed', e);
+    };
+
+    // If menu has already provided the settings root, init immediately.
+    if (_settingsRoot) {
+      initAll();
+      return;
     }
-  })();
+
+    // Otherwise, wait briefly for menu to report a settings mount; then continue regardless.
+    let waited = false;
+    const kick = () => { if (!waited) { waited = true; initAll(); } };
+
+    // Menu is expected to dispatch `${NS}:menu-ready` with { detail: { settingsRoot } }
+    const onMenuReady = (ev) => {
+      try {
+        if (ev?.detail?.settingsRoot) provideSettingsRoot(ev.detail.settingsRoot);
+      } catch {}
+      kick();
+      document.removeEventListener(`${NS}:menu-ready`, onMenuReady);
+    };
+    document.addEventListener(`${NS}:menu-ready`, onMenuReady, { once: true });
+
+    // Safety timeout: don't block boot if menu loads much later or isn't present.
+    setTimeout(kick, 700);
+  });
 
 })();
