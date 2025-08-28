@@ -1,16 +1,16 @@
-/* menu.js — AO3 Helper header menu + Import/Export + settings root (safe, lazy dialog) */
-;(function(){
+/* menu.js — AO3 Helper header menu (no settings modal; safe lazy Import/Export) */
+;(function () {
   'use strict';
 
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const W   = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const AO3H = W.AO3H || {};
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
 
-  const { $, $$, on, onReady, css } = (AO3H.util || {});
+  const { $, on, onReady, css } = (AO3H.util || {});
   const Flags = (AO3H.flags || {});
-  const dlog = (...a)=>{ if (AO3H.env?.DEBUG) console.log('[AO3H][menu]', ...a); };
+  const dlog  = (...a)=>{ if (AO3H.env?.DEBUG) console.log('[AO3H][menu]', ...a); };
 
-  /* ============================== STYLES ============================== */
+  /* ----------------------------- styles ----------------------------- */
   css`
   .${NS}-navlink{
     color:#fff; text-decoration:none; padding:.5em .8em; display:inline-block;
@@ -23,26 +23,9 @@
   .${NS}-menu{ min-width:260px; }
   .${NS}-menu a{ display:flex; justify-content:space-between; align-items:center; }
   .${NS}-kbd{ font-size:12px; color:#666; margin-left:1rem; }
-
-  .${NS}-settings-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999997; display:none; }
-  .${NS}-settings-backdrop.${NS}-open{ display:block; }
-  .${NS}-settings{
-    position:fixed; z-index:999998; left:50%; top:10vh; transform:translateX(-50%);
-    width:min(820px, 92vw); max-height:80vh; overflow:auto;
-    background:#fff; color:#000; border:1px solid #d6dbe6; border-radius:12px;
-    box-shadow:0 16px 40px rgba(2,15,35,.12);
-  }
-  .${NS}-settings-head{
-    display:flex; justify-content:space-between; align-items:center;
-    padding:12px 14px; border-bottom:1px solid #e6eaf3; position:sticky; top:0; background:#fff; z-index:1;
-  }
-  .${NS}-settings-title{ font-weight:700; margin:0; }
-  .${NS}-settings-close{ border:1px solid #ccd3e0; background:#f6f8fc; border-radius:8px; padding:6px 10px; cursor:pointer; }
-  .${NS}-settings-root{ padding:12px 14px; }
   `;
 
-  /* ===================== IMPORT/EXPORT CHOOSER (SAFE) ===================== */
-  // Build only when needed; append to <body> if present, else to <html>.
+  /* -------- Hidden works Import/Export (lazy, body-safe) -------- */
   function ensureHiddenWorksChooser(){
     if (document.getElementById(`${NS}-ie-dialog`)) return true;
 
@@ -81,7 +64,7 @@
     `;
 
     const parent = document.body || document.documentElement;
-    if (!parent) return false; // caller will retry soon
+    if (!parent) return false;
     parent.appendChild(dlg);
 
     const get = (id)=> document.getElementById(id);
@@ -97,56 +80,15 @@
 
     dlg.addEventListener('click', (e) => {
       const r = dlg.getBoundingClientRect();
-      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      const inside = e.clientX >= r.left && e.clientX <= r.right &&
+                     e.clientY >= r.top && e.clientY <= r.bottom;
       if (!inside) dlg.close();
     });
 
     return true;
   }
 
-  /* ============================ SETTINGS ROOT ============================ */
-  let settingsBackdrop, settingsBox, settingsRoot;
-  function buildSettingsModal(){
-    if (settingsRoot) return settingsRoot;
-
-    settingsBackdrop = document.createElement('div');
-    settingsBackdrop.className = `${NS}-settings-backdrop`;
-
-    settingsBox = document.createElement('div');
-    settingsBox.className = `${NS}-settings`;
-    settingsBox.innerHTML = `
-      <div class="${NS}-settings-head">
-        <h3 class="${NS}-settings-title">AO3 Helper — Settings</h3>
-        <button type="button" class="${NS}-settings-close">Close</button>
-      </div>
-      <div class="${NS}-settings-root" id="${NS}-settings-root"></div>
-    `;
-    settingsRoot = settingsBox.querySelector(`#${NS}-settings-root`);
-
-    document.body.append(settingsBackdrop, settingsBox);
-
-    const close = ()=> {
-      settingsBackdrop.classList.remove(`${NS}-open`);
-      settingsBox.style.display = 'none';
-    };
-    const open = ()=> {
-      settingsBackdrop.classList.add(`${NS}-open`);
-      settingsBox.style.display = 'block';
-    };
-
-    on(settingsBackdrop, 'click', close);
-    on(settingsBox.querySelector(`.${NS}-settings-close`), 'click', close);
-    document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
-
-    settingsBox.__ao3h_open = open;
-    return settingsRoot;
-  }
-  function openSettingsModal(){
-    if (!settingsBox) buildSettingsModal();
-    settingsBox.__ao3h_open();
-  }
-
-  /* ============================== HEADER MENU ============================== */
+  /* ----------------------------- menu ----------------------------- */
   function buildMenu(flags){
     if (document.querySelector(`li.${NS}-root`)) return;
 
@@ -178,6 +120,7 @@
       return li;
     }
 
+    // Feature toggles
     menu.appendChild(item('Save scroll position', 'saveScroll'));
     menu.appendChild(item('Chapter word count', 'chapterWordCount'));
     menu.appendChild(item('Hide works by tags', 'hideByTags'));
@@ -189,12 +132,16 @@
       const mli = document.createElement('li');
       const a = document.createElement('a');
       a.href = '#'; a.innerHTML = `<span>Manage hidden tags…</span>`;
-      on(a, 'click', (e)=>{ e.preventDefault(); document.dispatchEvent(new CustomEvent(`${NS}:open-hide-manager`)); closeMenu(); });
+      on(a, 'click', (e)=>{
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent(`${NS}:open-hide-manager`));
+        closeMenu();
+      });
       mli.appendChild(a);
       menu.appendChild(mli);
     }
 
-    // Hidden works… (lazy create the chooser dialog)
+    // Hidden works… (Import / Export) — lazy create dialog on click
     {
       const mli = document.createElement('li');
       const a = document.createElement('a');
@@ -225,18 +172,9 @@
       menu.appendChild(mli);
     }
 
-    // Settings…
-    {
-      const mli = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = '#'; a.innerHTML = `<span>Settings…</span>`;
-      on(a, 'click', (e)=>{ e.preventDefault(); openSettingsModal(); closeMenu(); });
-      mli.appendChild(a);
-      menu.appendChild(mli);
-    }
-
     li.append(toggle, menu);
 
+    // Open/close behavior
     li.tabIndex = 0;
     function openMenu(){ li.classList.add('open'); toggle.setAttribute('aria-expanded','true'); }
     function closeMenu(){ li.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); }
@@ -249,6 +187,7 @@
     on(document, 'click', (e)=>{ if (!li.contains(e.target)) closeMenu(); });
     on(document, 'keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
+    // Toggle click → flip flags
     on(menu, 'click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
@@ -260,6 +199,7 @@
       a.setAttribute('aria-checked', String(next));
     });
 
+    // Attach to AO3 header or float if missing
     const navUL =
       $('ul.primary.navigation.actions') ||
       $('#header .primary.navigation ul') ||
@@ -271,17 +211,19 @@
       const floater = document.createElement('div');
       floater.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:999999;';
       floater.appendChild(li);
-      document.body.appendChild(floater);
+      (document.body || document.documentElement).appendChild(floater);
     }
   }
 
-  /* =============================== BOOT =============================== */
+  /* ------------------------------ boot ------------------------------ */
   onReady(async ()=>{
-    const root = (buildSettingsModal && buildSettingsModal()) || null;
-    AO3H.provideSettingsRoot && AO3H.provideSettingsRoot(root);
-    document.dispatchEvent(new CustomEvent(`${NS}:menu-ready`, { detail: { settingsRoot: root }}));
-    const flags = await (Flags.get ? Flags.get() : Promise.resolve({}));
-    buildMenu(flags);
+    try {
+      const flags = await (Flags.get ? Flags.get() : Promise.resolve({}));
+      buildMenu(flags);
+      dlog('Menu ready');
+    } catch (err) {
+      console.error('[AO3H][menu] build failed', err);
+    }
   });
 
 })();
