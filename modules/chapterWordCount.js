@@ -1,8 +1,8 @@
-// modules/chapterWordCount.js
 ;(function () {
   'use strict';
 
-  const AO3H = window.AO3H || {};
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const AO3H = W.AO3H || {};
   const { env:{ NS } = {}, util = {}, flags } = AO3H;
   const { onReady, observe, debounce, on, css } = util || {};
   const { getFlags } = flags || {};
@@ -11,6 +11,7 @@
     console.error('[AO3H][ChapterWordCount] core not ready');
     return;
   }
+
 
   const MOD_ID = 'ChapterWordCount';
 
