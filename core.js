@@ -1,16 +1,21 @@
-// core.js
+/* -------------------------------------------------------------
+ * AO3 Helper — Core
+ * - Safe early stub for AO3H.register (handles race conditions)
+ * - Final register supports: register('ID', def) | register(defWithId) | register({ID: def, ...})
+ * - Exposes tiny utils, storage, flags
+ * - Boots all registered modules
+ * ------------------------------------------------------------- */
 
-
-/* ===== EARLY STUB (runs immediately, before anything else) ===== */
+/* ===== EARLY STUB (runs immediately) ===== */
 ;(function () {
-  const W = window;
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   W.AO3H = W.AO3H || {};
-  // If register isn't a function yet, create a queuing stub so modules can call it safely.
   if (typeof W.AO3H.register !== 'function') {
-    const q = [];
-    W.AO3H.__pending = q;
-    W.AO3H.register = function stubRegister(a, b) {
-      q.push([a, b]);
+    const q = W.AO3H.__pending || (W.AO3H.__pending = []);
+    // queue any call shape: ('id', def) | (def) | ({ id: def, ... })
+    W.AO3H.register = function () {
+      if (arguments.length === 2) q.push([arguments[0], arguments[1]]);
+      else q.push([arguments[0]]);
     };
   }
 })();
@@ -19,10 +24,7 @@
 ;(function () {
   'use strict';
 
-  /* =========================
-   * AO3H global + namespaces
-   * ========================= */
-  const W = window;
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   W.AO3H = W.AO3H || {};
   const AO3H = W.AO3H;
 
@@ -34,15 +36,11 @@
 
   const { NS, DEBUG } = AO3H.env;
 
-  /* ======================
-   * Tiny logging helper
-   * ====================== */
+  /* ====================== Logging ====================== */
   function dlog(...a){ if (DEBUG) console.log('[AO3H]', ...a); }
   AO3H.util.dlog = dlog;
 
-  /* ======================
-   * Storage (GM + namesp.)
-   * ====================== */
+  /* ====================== Storage ====================== */
   const Storage = {
     key: (k) => `${NS}:${k}`,
     async get(k, d=null){
@@ -67,11 +65,9 @@
     }
   };
   AO3H.util.Storage = Storage;
-  AO3H.store = AO3H.util.Storage;
+  AO3H.store = AO3H.util.Storage; // ← legacy alias used by some modules
 
-  /* ======================
-   * Small DOM utilities
-   * ====================== */
+  /* ====================== DOM utils ====================== */
   const onReady = (fn) => (document.readyState === 'loading')
     ? document.addEventListener('DOMContentLoaded', fn, { once:true })
     : fn();
@@ -107,7 +103,6 @@
   AO3H.util.observe  = observe;
   AO3H.util.css      = css;
 
-  // Optional router
   AO3H.util.route = {
     path: () => location.pathname,
     isWork: () => /^\/works\/\d+(?:\/chapters\/\d+)?$/.test(location.pathname),
@@ -117,22 +112,11 @@
     isBookmarks: () => /^\/users\/[^/]+\/bookmarks/.test(location.pathname),
   };
 
-  /* ======================
-   * FINAL register() impl
-   * ====================== */
+  /* ====================== final register() ====================== */
   function finalRegister(arg1, arg2) {
-    // Style: AO3H.register('ID', def)
-    if (typeof arg1 === 'string') {
-      AO3H.modules[arg1] = arg2;
-      return;
-    }
-    // Style: AO3H.register(defWithId)
+    if (typeof arg1 === 'string') { AO3H.modules[arg1] = arg2; return; }
     if (arg1 && typeof arg1 === 'object' && !arg2) {
-      if (typeof arg1.id === 'string' && arg1.id) {
-        AO3H.modules[arg1.id] = arg1;
-        return;
-      }
-      // Style: AO3H.register({ key: def, ... })
+      if (typeof arg1.id === 'string' && arg1.id) { AO3H.modules[arg1.id] = arg1; return; }
       for (const [k, v] of Object.entries(arg1)) {
         if (v && typeof v === 'object') {
           const id = (typeof v.id === 'string' && v.id) ? v.id : k;
@@ -144,23 +128,23 @@
     }
   }
 
-  // Replace stub with final, then flush any queued calls
-  const pending = AO3H.__pending || [];
-  AO3H.register = finalRegister;
-  for (const [a, b] of pending) try { finalRegister(a, b); } catch(e){ console.error('[AO3H] queued register failed', e); }
-  AO3H.__pending = []; // clear
-  document.dispatchEvent(new CustomEvent(`${NS}:register-ready`));
+  // Swap stub → final, then flush queued calls
+  {
+    const pending = AO3H.__pending || [];
+    AO3H.register = finalRegister;
+    for (const args of pending) { try { finalRegister.apply(null, args); } catch (e) { console.error('[AO3H] queued register failed', e); } }
+    AO3H.__pending = []; // clear
+    document.dispatchEvent(new CustomEvent(`${NS}:register-ready`));
+  }
 
-  // Also merge legacy window.ao3hModules if present
+  // Merge legacy window.ao3hModules, if present
   if (W.ao3hModules && typeof W.ao3hModules === 'object') {
     for (const [id, def] of Object.entries(W.ao3hModules)) {
       try { finalRegister(id, def); } catch(e){ console.error('[AO3H] legacy merge failed', id, e); }
     }
   }
 
-  /* ======================
-   * Flags (feature toggles)
-   * ====================== */
+  /* ====================== Flags ====================== */
   const Defaults = {
     features: {
       saveScroll: true,
@@ -197,27 +181,19 @@
   AO3H.flags.setFlag  = setFlag;
   AO3H.flags.Defaults = Defaults;
 
-  /* ======================
-   * Boot: init each module
-   * ====================== */
+  /* ====================== Boot ====================== */
   (async function boot(){
     try {
       const f = await getFlags();
-
-      // Tell listeners (e.g., menu.js) that flags are ready
       document.dispatchEvent(new CustomEvent(`${NS}:boot-flags-ready`, { detail: f }));
-
-      // Init all registered modules
       for (const [id, mod] of Object.entries(AO3H.modules)) {
         try { await mod.init?.(f); }
         catch (e) { console.error('[AO3H] init failed:', id || mod?.id || '(unknown)', e); }
       }
-
-      // Let modules react to future flag changes (optional hook)
-      on(document, `${NS}:flags-updated`, async () => {
+      AO3H.util.on(document, `${NS}:flags-updated`, async () => {
         const nf = await getFlags();
         for (const [id, mod] of Object.entries(AO3H.modules)) {
-          try { mod.onFlagsUpdated?.(nf); } catch (e) { /* optional */ }
+          try { mod.onFlagsUpdated?.(nf); } catch {}
         }
       });
     } catch (e) {
