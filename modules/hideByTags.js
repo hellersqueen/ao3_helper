@@ -241,115 +241,155 @@
     });
   }
 
-  /* ------------------------------ MANAGER ------------------------------ */
-  let mgrBackdrop, mgrBox, mgrList, mgrInput, mgrCount;
-  function openManager(){
-    if (!mgrBackdrop){
-      mgrBackdrop = document.createElement('div');
-      mgrBackdrop.className = `${NS}-mgr-backdrop`;
-      mgrBox = document.createElement('div');
-      mgrBox.className = `${NS}-mgr`;
-      mgrBox.innerHTML = `
-        <div class="${NS}-mgr-head">
-          <h3 class="${NS}-mgr-title">AO3 Helper — Hidden Tags</h3>
-          <button type="button" class="${NS}-btn ${NS}-close">Close</button>
-        </div>
-        <div class="${NS}-mgr-body">
-          <div class="${NS}-row">
-            <input class="${NS}-input" id="${NS}-hbt-input" placeholder="Add tag (exact name)…” />
-            <button class="${NS}-btn" id="${NS}-hbt-add" type="button">Add</button>
-          </div>
-          <div class="${NS}-row">
-            <button class="${NS}-btn" id="${NS}-hbt-export" type="button">Export JSON</button>
-            <button class="${NS}-btn" id="${NS}-hbt-import" type="button">Import JSON</button>
-            <button class="${NS}-btn" id="${NS}-hbt-clear"  type="button">Clear all</button>
-            <span id="${NS}-hbt-count" style="margin-left:auto;opacity:.8;"></span>
-          </div>
-          <div class="${NS}-list" id="${NS}-hbt-list"></div>
-        </div>
-      `;
-      document.body.append(mgrBackdrop, mgrBox);
+ /* --------------------------- Hidden Tags Manager (CLASSIC) --------------------------- */
+function openManager(){
+  css`
+  .${NS}-mgr-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999998; }
+  .${NS}-mgr {
+    position:fixed; top:10vh; left:50%; transform:translateX(-50%);
+    background:#fff; color:#000; border:1px solid #e5e7eb; border-radius:12px;
+    padding:12px; z-index:999999; box-shadow:0 16px 40px rgba(2,15,35,.12);
+    font: 13px/1.4 system-ui,-apple-system, Segoe UI, Roboto, sans-serif;
+    width:min(780px, 96vw); max-height: 82vh; display:grid; gap:10px; overflow:auto;
+  }
+  .${NS}-mgr h3{ margin:0 0 4px; font-size:18px; }
+  .${NS}-row{ display:grid; grid-template-columns: 1fr auto; gap:10px; }
+  .${NS}-ta{
+    width:100%; min-height: 280px; resize:vertical;
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    border:1px solid #cfd6e4; border-radius:8px; padding:10px; background:#f9fbff;
+  }
+  .${NS}-help{ font-size:12px; color:#4b5563; }
+  .${NS}-btnbar{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .${NS}-btn{
+    height: 32px; padding: 0 12px; border-radius: 8px; border:1px solid #cfd6e4;
+    background:#f5f7fb; cursor:pointer; transition: background .15s, transform .12s, border-color .15s;
+    font-size:13px;
+  }
+  .${NS}-btn:hover{ background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
+  .${NS}-count{ font-weight:600; }
+  .${NS}-split{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .${NS}-mini{ width: 220px; }
+  `;
 
-      mgrList  = $('#'+NS+'-hbt-list', mgrBox);
-      mgrInput = $('#'+NS+'-hbt-input', mgrBox);
-      mgrCount = $('#'+NS+'-hbt-count', mgrBox);
+  const backdrop = document.createElement('div');
+  backdrop.className = `${NS}-mgr-backdrop`;
 
-      const close = ()=> { mgrBackdrop.classList.remove(`${NS}-open`); mgrBox.style.display='none'; };
-      const open  = ()=> { mgrBackdrop.classList.add(`${NS}-open`);  mgrBox.style.display='block'; };
-      on(mgrBackdrop, 'click', close);
-      on($('.'+NS+'-close', mgrBox), 'click', close);
-      on(document, 'keydown', (e)=>{ if (mgrBox.style.display!=='none' && e.key==='Escape') close(); });
+  const box = document.createElement('div');
+  box.className = `${NS}-mgr`;
+  box.innerHTML = `
+    <h3>AO3 Helper — Hidden Tags</h3>
+    <div class="${NS}-split">
+      <span class="${NS}-help">One tag per line (canonical form). Example: <code>midoriya izuku & shinsou hitoshi</code></span>
+      <span class="${NS}-count"></span>
+    </div>
+    <div class="${NS}-row">
+      <textarea class="${NS}-ta" spellcheck="false" placeholder="Type or paste hidden tags here…"></textarea>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <input class="${NS}-mini" type="text" placeholder="Add single tag…" />
+        <button class="${NS}-btn add" type="button">Add</button>
+        <button class="${NS}-btn remove" type="button">Remove</button>
+        <button class="${NS}-btn sort" type="button">Sort A→Z</button>
+        <button class="${NS}-btn dedupe" type="button">De-duplicate</button>
+        <button class="${NS}-btn export" type="button">Export JSON</button>
+        <button class="${NS}-btn import" type="button">Import JSON</button>
+        <button class="${NS}-btn close" type="button">Close</button>
+      </div>
+    </div>
+    <div class="${NS}-btnbar">
+      <button class="${NS}-btn apply" type="button">Save changes</button>
+    </div>
+  `;
 
-      on($('#'+NS+'-hbt-add', mgrBox), 'click', async ()=> {
-        const v = toCanon(mgrInput.value);
-        if (!v) return;
-        const list = await getList();
-        if (!list.includes(v)) await setList([...list, v]);
-        mgrInput.value = '';
-        await renderList();
-        document.dispatchEvent(new CustomEvent(`${NS}:hideByTags-updated`));
-      });
+  function close(){ backdrop.remove(); box.remove(); }
 
-      on($('#'+NS+'-hbt-export', mgrBox), 'click', async ()=>{
-        const blob = new Blob([JSON.stringify(await getList(), null, 2)], {type:'application/json'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'ao3h-hide-tags.json';
-        a.click();
-        setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-      });
+  backdrop.addEventListener('click', close);
+  box.querySelector('.close').addEventListener('click', close);
+  document.addEventListener('keydown', function esc(e){
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+  });
 
-      on($('#'+NS+'-hbt-import', mgrBox), 'click', async ()=>{
-        const input = document.createElement('input');
-        input.type = 'file'; input.accept = 'application/json';
-        input.addEventListener('change', async ()=>{
-          const f = input.files?.[0]; if (!f) return;
-          try{
-            const arr = JSON.parse(await f.text());
-            if (!Array.isArray(arr)) throw new Error('Invalid JSON (expected array)');
-            await setList(arr);
-            await renderList();
-            document.dispatchEvent(new CustomEvent(`${NS}:hideByTags-updated`));
-          } catch(err){ alert('Import failed: '+err.message); }
-        }, { once:true });
-        input.click();
-      });
+  document.body.append(backdrop, box);
 
-      on($('#'+NS+'-hbt-clear', mgrBox), 'click', async ()=>{
-        if (!confirm('Clear all hidden tags?')) return;
-        await setList([]);
-        await renderList();
-        document.dispatchEvent(new CustomEvent(`${NS}:hideByTags-updated`));
-      });
+  const $ta = box.querySelector(`.${NS}-ta`);
+  const $count = box.querySelector(`.${NS}-count`);
+  const $input = box.querySelector(`.${NS}-mini`);
 
-      mgrBox.__open = open;
+  const norm = (s)=> String(s||'').replace(/\s+/g,' ').replace(/\u00A0/g,' ').trim().toLowerCase();
+  const readLines = ()=> $ta.value.split(/\r?\n/).map(norm).filter(Boolean);
+  const writeLines = (arr)=>{ $ta.value = (arr||[]).join('\n'); updateCount(); };
+  const updateCount = ()=>{ const n = readLines().length; $count.textContent = `${n} tag${n===1?'':'s'}`; };
+
+  // Load existing list
+  (async () => { writeLines(await getHidden()); })();
+
+  // Buttons
+  box.querySelector('.add').addEventListener('click', ()=>{
+    const v = norm($input.value); if (!v) return;
+    const list = readLines(); if (!list.includes(v)) list.push(v);
+    writeLines(list); $input.value = '';
+  });
+
+  box.querySelector('.remove').addEventListener('click', ()=>{
+    const v = norm($input.value); if (!v) return;
+    writeLines(readLines().filter(t => t !== v)); $input.value = '';
+  });
+
+  box.querySelector('.sort').addEventListener('click', ()=>{
+    writeLines(readLines().sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'})));
+  });
+
+  box.querySelector('.dedupe').addEventListener('click', ()=>{
+    writeLines(Array.from(new Set(readLines())));
+  });
+
+  box.querySelector('.export').addEventListener('click', ()=>{
+    const list = readLines();
+    const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'ao3h-hidden-tags.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  box.querySelector('.import').addEventListener('click', ()=>{
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'application/json';
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0]; if (!file) return;
+      try {
+        const incoming = JSON.parse(await file.text());
+        if (!Array.isArray(incoming)) throw new Error('Not an array');
+        const merged = Array.from(new Set(readLines().concat(incoming.map(norm)))).filter(Boolean);
+        writeLines(merged);
+      } catch (err) {
+        alert('Invalid JSON file for tags.\n' + (err?.message || ''));
+      }
+    }, { once:true });
+    input.click();
+  });
+
+  // Save changes
+  box.querySelector('.apply').addEventListener('click', async ()=>{
+    const cleaned = Array.from(new Set(readLines()));
+    await setHidden(cleaned);
+
+    // Keep groups map consistent (we can leave helpers in place)
+    const map = await getGroupsMap();
+    let changed = false;
+    for (const k of Object.keys(map)) {
+      if (!cleaned.includes(k)) { delete map[k]; changed = true; }
     }
-    mgrBox.__open();
-    renderList();
-  }
+    if (changed) await setGroupsMap(map);
 
-  async function renderList(){
-    const list = (await getList()).sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}));
-    mgrList.innerHTML = '';
-    mgrCount.textContent = `${list.length} tag${list.length!==1?'s':''}`;
-    list.forEach((t, idx)=>{
-      const row = document.createElement('div');
-      row.className = `${NS}-pill`;
-      row.innerHTML = `<b>${t}</b>`;
-      const del = document.createElement('button');
-      del.className = `${NS}-btn`;
-      del.textContent = 'Delete';
-      on(del, 'click', async ()=>{
-        const arr = await getList();
-        arr.splice(arr.indexOf(t), 1);
-        await setList(arr);
-        await renderList();
-        document.dispatchEvent(new CustomEvent(`${NS}:hideByTags-updated`));
-      });
-      row.appendChild(del);
-      mgrList.appendChild(row);
-    });
-  }
+    await processList(); // re-apply hides to the current page
+    close();
+  });
+
+  $ta.addEventListener('input', updateCount);
+}
+/* ------------------------- /Hidden Tags Manager (CLASSIC) -------------------------- */
 
   /* ----------------------------- PUBLIC API ---------------------------- */
   let enabled = false;
