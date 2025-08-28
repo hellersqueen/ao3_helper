@@ -44,16 +44,21 @@
   `;
 
   /* ===================== IMPORT/EXPORT CHOOSER DIALOG ===================== */
-  function ensureHiddenWorksChooser(){
-    if (document.getElementById(`${NS}-ie-dialog`)) return true;
+ function ensureHiddenWorksChooser(){
+  // If it already exists, we're done.
+  if (document.getElementById(`${NS}-ie-dialog`)) return true;
 
-    // require body
-    if (!document.body) {
-      document.addEventListener('DOMContentLoaded', ensureHiddenWorksChooser, { once:true });
-      return false;
-    }
+  // If <body> isn't ready yet, try again later.
+  if (!document.body) {
+    // Schedule a one-time retry at DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', () => ensureHiddenWorksChooser(), { once: true });
+    // Also schedule a short fallback retry, in case DOMContentLoaded already fired
+    setTimeout(() => document.body && ensureHiddenWorksChooser(), 200);
+    return false;
+  }
 
-    css`
+  // --- Styles ---
+  css`
     #${NS}-ie-dialog::backdrop { background: rgba(0,0,0,.35); }
     #${NS}-ie-dialog{
       border:1px solid #bfc7cf; border-radius:10px; padding:16px 16px 14px;
@@ -71,43 +76,46 @@
       padding:6px 10px; border-radius:8px; border:1px solid #ccc; background:#f7f7f7; cursor:pointer; font-size:12px;
     }`;
 
-    const dlg = document.createElement('dialog');
-    dlg.id = `${NS}-ie-dialog`;
-    dlg.innerHTML = `
-      <form method="dialog" style="margin:0">
-        <h3 id="${NS}-ie-title">Hidden works</h3>
-        <p id="${NS}-ie-desc">Choose what you want to do with your hidden-works list.</p>
-        <div id="${NS}-ie-row">
-          <button type="button" id="${NS}-ie-export">Export JSON</button>
-          <button type="button" id="${NS}-ie-import">Import JSON</button>
-        </div>
-        <div id="${NS}-ie-foot">
-          <button id="${NS}-ie-cancel">Close</button>
-        </div>
-      </form>
-    `;
-    document.body.appendChild(dlg);
+  // --- Dialog DOM ---
+  const dlg = document.createElement('dialog');
+  dlg.id = `${NS}-ie-dialog`;
+  dlg.innerHTML = `
+    <form method="dialog" style="margin:0">
+      <h3 id="${NS}-ie-title">Hidden works</h3>
+      <p id="${NS}-ie-desc">Choose what you want to do with your hidden-works list.</p>
+      <div id="${NS}-ie-row">
+        <button type="button" id="${NS}-ie-export">Export JSON</button>
+        <button type="button" id="${NS}-ie-import">Import JSON</button>
+      </div>
+      <div id="${NS}-ie-foot">
+        <button id="${NS}-ie-cancel">Close</button>
+      </div>
+    </form>
+  `;
+  document.body.appendChild(dlg);
 
-    // Buttons -> global helpers exposed by HideFanficWithNotes
-    on($('#'+NS+'-ie-export', dlg), 'click', () => {
-      (W.ao3hExportHiddenWorks || (()=>alert('Exporter not loaded yet')))();
-      dlg.close();
-    });
-    on($('#'+NS+'-ie-import', dlg), 'click', () => {
-      (W.ao3hImportHiddenWorks || (()=>alert('Importer not loaded yet')))();
-      dlg.close();
-    });
-    on($('#'+NS+'-ie-cancel', dlg), 'click', () => dlg.close());
+  // Buttons -> global helpers
+  const get = (id)=> document.getElementById(id);
+  get(`${NS}-ie-export`).addEventListener('click', () => {
+    (W.ao3hExportHiddenWorks || (()=>alert('Exporter not loaded yet')))();
+    dlg.close();
+  });
+  get(`${NS}-ie-import`).addEventListener('click', () => {
+    (W.ao3hImportHiddenWorks || (()=>alert('Importer not loaded yet')))();
+    dlg.close();
+  });
+  get(`${NS}-ie-cancel`).addEventListener('click', () => dlg.close());
 
-    // Close on backdrop click
-    dlg.addEventListener('click', (e) => {
-      const r = dlg.getBoundingClientRect();
-      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-      if (!inside) dlg.close();
-    });
+  // Backdrop click closes
+  dlg.addEventListener('click', (e) => {
+    const r = dlg.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!inside) dlg.close();
+  });
 
-    return true;
-  }
+  return true;
+}
+
 
   /* ============================ SETTINGS ROOT ============================ */
   // A modal with an always-present content container that modules can mount into.
