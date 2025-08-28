@@ -1,10 +1,11 @@
+// menu.js
 ;(function () {
   'use strict';
 
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const W   = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const AO3H = W.AO3H || {};
-  const NS  = (AO3H.env && AO3H.env.NS) || 'ao3h';
-  const css = AO3H.util && AO3H.util.css;
+  const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
+  const css  = AO3H.util && AO3H.util.css;
 
   // Access flags functions at call-time (avoid capturing undefined too early)
   const getFlagsNow = () =>
@@ -18,15 +19,15 @@
       : Promise.reject(new Error('flags not ready'));
 
   if (!css) {
-    console.error('[AO3H][menu] core CSS helper not ready'); 
-    // We still attach listeners below so we can build later.
+    console.warn('[AO3H][menu] css helper not ready yet — will build after boot event');
   }
 
   // --- Import/Export chooser used by HideFanficWithNotes (optional) ---
   function ensureHiddenWorksChooser(){
+    if (!css) return;                       // wait until css helper exists
     if (document.getElementById('ao3h-ie-dialog')) return;
 
-    css && css`
+    css`
       #ao3h-ie-dialog::backdrop { background: rgba(0,0,0,.35); }
       #ao3h-ie-dialog {
         border: 1px solid #bfc7cf; border-radius: 10px; padding: 16px 16px 14px;
@@ -83,7 +84,7 @@
   }
 
   function buildSettingsUI(flags){
-    if (!css) return; // wait until css helper exists
+    if (!css) { console.warn('[AO3H][menu] css not ready at build time'); return; }
 
     css`
       .${NS}-navlink{
@@ -115,9 +116,9 @@
     menu.className = `menu dropdown-menu ${NS}-menu`;
     menu.setAttribute('role', 'menu');
 
-    function item(label, key, hint){
+    const makeItem = (label, key, hint) => {
       const li = document.createElement('li');
-      const a = document.createElement('a');
+      const a  = document.createElement('a');
       a.href = '#';
       a.setAttribute('role', 'menuitemcheckbox');
       a.dataset.flag = key;
@@ -128,16 +129,16 @@
       a.setAttribute('aria-checked', String(!!(flags && flags[key])));
       li.appendChild(a);
       return li;
-    }
+    };
 
-    // Toggles (now includes Hide fanfic with notes)
-    menu.appendChild(item('Save scroll position',        'saveScroll'));
-    menu.appendChild(item('Chapter word count',          'chapterWordCount'));
-    menu.appendChild(item('Hide works by tags',          'hideByTags'));
-    menu.appendChild(item('Hide fanfic (with notes)',    'hideFanficWithNotes'));
-    menu.appendChild(item('Auto filter',                 'autoSearchFilters'));
+    // Toggles (includes your "Hide fanfic (with notes)")
+    menu.appendChild(makeItem('Save scroll position',       'saveScroll'));
+    menu.appendChild(makeItem('Chapter word count',         'chapterWordCount'));
+    menu.appendChild(makeItem('Hide works by tags',         'hideByTags'));
+    menu.appendChild(makeItem('Hide fanfic (with notes)',   'hideFanficWithNotes'));
+    menu.appendChild(makeItem('Auto filter',                'autoSearchFilters'));
 
-    // Hidden Tags Manager
+    // Manager for hidden tags
     {
       const liM = document.createElement('li');
       const a = document.createElement('a');
@@ -152,7 +153,7 @@
       menu.appendChild(liM);
     }
 
-    // Hidden works Import/Export (used by HideFanficWithNotes)
+    // Hidden works import/export dialog
     {
       ensureHiddenWorksChooser();
       const liE = document.createElement('li');
@@ -186,6 +187,7 @@
     toggle.addEventListener('click', (e)=>{ e.preventDefault(); li.classList.contains(`${NS}-open`) ? closeMenu() : openMenu(); });
     document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
+    // Place in AO3 nav if present; else float
     const navUL =
       document.querySelector('ul.primary.navigation.actions') ||
       document.querySelector('#header .primary.navigation ul') ||
@@ -199,49 +201,45 @@
       document.body.appendChild(floater);
     }
 
-    // Toggle handler (resolve flags funcs at click-time)
+    // Toggle handler
     menu.addEventListener('click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
-      const key = a.dataset.flag;
-
-      const f = await getFlagsNow();
-      if (!f) return; // core still not ready
-
-      const next = !f[key];
-      try { await setFlagNow(key, next); } catch {}
-      a.querySelector(`.${NS}-state`).textContent = next ? '✓' : '';
-      a.setAttribute('aria-checked', String(next));
-
-      document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`));
+      try {
+        const f = (await getFlagsNow()) || {};
+        const key  = a.dataset.flag;
+        const next = !f[key];
+        await setFlagNow(key, next);
+        a.querySelector(`.${NS}-state`).textContent = next ? '✓' : '';
+        a.setAttribute('aria-checked', String(next));
+        document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`));
+      } catch (err) {
+        console.error('[AO3H][menu] toggle failed', err);
+        alert('AO3 Helper: flags not ready yet.');
+      }
     });
 
     // Keep menu in sync when flags change elsewhere
     document.addEventListener(`${NS}:flags-updated`, async ()=>{
-      const f = await getFlagsNow();
-      if (!f) return;
+      const f = (await getFlagsNow()) || {};
       menu.querySelectorAll('a[data-flag]').forEach(a=>{
         const k = a.dataset.flag, on = !!f[k];
-        const state = a.querySelector(`.${NS}-state`);
-        if (state) state.textContent = on ? '✓' : '';
+        a.querySelector(`.${NS}-state`).textContent = on ? '✓' : '';
         a.setAttribute('aria-checked', String(on));
       });
     });
   }
 
-  // Build when core announces flags ready…
+  // Build when core announces flags are ready
   document.addEventListener(`${NS}:boot-flags-ready`, (e) => {
     try { buildSettingsUI(e.detail || {}); }
-    catch (err) { console.error('[AO3H][menu] build failed (event path)', err); }
+    catch (err) { console.error('[AO3H][menu] build failed on boot event', err); }
   });
 
-  // …and also try immediately in case this file loads after the event fired
-  (async () => {
-    try {
-      const f = await getFlagsNow();
-      if (f) buildSettingsUI(f);
-    } catch (err) {
-      // ignore; core will fire the event later
+  // Also attempt an immediate build if flags are already available
+  getFlagsNow().then(f => {
+    if (f) {
+      try { buildSettingsUI(f); } catch (err) { console.error('[AO3H][menu] immediate build failed', err); }
     }
-  })();
+  });
 })();
