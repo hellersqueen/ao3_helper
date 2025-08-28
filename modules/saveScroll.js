@@ -3,11 +3,12 @@
   'use strict';
 
   const AO3H = window.AO3H || {};
-  const { env:{ NS } = {}, util = {}, flags } = AO3H || {};
+  const { env:{ NS } = {}, util = {}, flags } = AO3H;
+  // NOTE: Storage lives under util.Storage (core exports it that way)
   const { onReady, on, throttle, Storage } = util || {};
   const { getFlags } = flags || {};
 
-  if (!NS || !onReady || !on || !throttle || !Storage || !getFlags) {
+  if (!Storage || !onReady || !on || !throttle || !getFlags || !NS) {
     console.error('[AO3H][SaveScroll] core not ready'); return;
   }
 
