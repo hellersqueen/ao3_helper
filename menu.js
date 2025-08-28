@@ -1,11 +1,13 @@
 ;(function () {
   'use strict';
 
-  // Pull what we need from core
-  const { env:{ NS }, util:{ css }, flags:{ getFlags, setFlag } } = window.AO3H || {};
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const AO3H = W.AO3H || {};
+  const { env:{ NS } = {}, util:{ css } = {}, flags:{ getFlags, setFlag } = {} } = AO3H;
   if (!NS || !css || !getFlags || !setFlag) {
     console.error('[AO3H][menu] core not ready'); return;
   }
+
 
   // --- Import/Export chooser used by Module 5 (optional) ---
   function ensureHiddenWorksChooser(){
