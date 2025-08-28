@@ -1,17 +1,10 @@
 // modules/hideFanficWithNotes.js
 ;(function () {
   'use strict';
-  // Use the same global as core (important for Tampermonkey)
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-  const AO3H = W.AO3H || {};
-  const { env:{ NS } = {}, util = {}, flags } = AO3H;
-  const { onReady, on, css } = util || {};
-  const { getFlags } = flags || {};
 
-  if (!NS || !onReady || !on || !css || !getFlags) {
-    console.error('[AO3H][HideFanficWithNotes] core not ready');
-    return;
-  }
+  // IMPORTANT: do NOT pull AO3H helpers yet; core may not be ready.
+  // We’ll fetch env/util/flags inside init().
+  const T = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
   const MOD_ID  = 'HideFanficWithNotes';
   const DB_NAME = 'hiddenWorksDB';
@@ -240,13 +233,20 @@
   }
 
   /* --------------------------------- init --------------------------------- */
+    /* --------------------------------- init --------------------------------- */
   async function init(initialFlags) {
+    // Fetch AO3H helpers *now* (core is ready when init is called)
+    const AO3H = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).AO3H || {};
+    const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
+    const css  = AO3H.util && AO3H.util.css;
+
+    if (!css) { console.error('[AO3H][HideFanficWithNotes] css helper not ready'); return; }
+
     const enabled = !!(initialFlags && initialFlags.hideFanficWithNotes);
     if (!enabled) return;
     if (!/\/works\b/.test(location.pathname)) return;
 
-
-    // inject styles now (after core is guaranteed ready)
+    // inject styles after core is ready
     css`
       .custom-hide-button { position: relative; float: right; margin-right: 10px; top: -25px; }
       .hide { display:flex; align-items:center; justify-content:space-between; padding:5px 10px; background:#f0f0f0; border-radius:5px; }
@@ -273,14 +273,13 @@
 
     if (!db) await openDB();
     await transferFromLocalStorage();
-    
+
     // buttons + re-hide persisted
     const all = await getAllWorks();
     jQ('ol.index li.blurb').each((_, el) => {
       const jQb = jQ(el);
       const id  = workIdFromBlurb(jQb);
 
-      // add button if needed
       if (jQb.find('.custom-hide-button').length === 0) {
         const btn = document.createElement('button');
         btn.textContent = 'Hide';
@@ -306,16 +305,16 @@
     // delegated events
     jQ(document).on('click', '.hide .show', async function () {
       const blurbEl = jQ(this).closest('li')[0];
-      const jQb = jQ(blurbEl);
-      const id  = workIdFromBlurb(jQb);
+      const jQb     = jQ(blurbEl);
+      const id      = workIdFromBlurb(jQb);
       showWork(jQ, blurbEl);
       try { await getWork(id); } catch (e) { console.error('[AO3H] show failed', e); }
     });
 
     jQ(document).on('click', '.hide .unhide', async function () {
       const blurbEl = jQ(this).closest('li')[0];
-      const jQb = jQ(blurbEl);
-      const id  = workIdFromBlurb(jQb);
+      const jQb     = jQ(blurbEl);
+      const id      = workIdFromBlurb(jQb);
       if (!confirm('Unhide this work permanently (until you hide it again)?')) return;
       showWork(jQ, blurbEl);
       try {
@@ -345,16 +344,18 @@
     });
   }
 
-   /* ----------------------- Register in module registry --------------------- */
+  /* ----------------------- Register in module registry --------------------- */
   const MOD = { id: MOD_ID, title: 'Hide Fanfic (with notes)', init };
 
-    const T = window;               // <- match core.js
-  T.AO3H = T.AO3H || {};
-  if (typeof T.AO3H.register === 'function') {
-    T.AO3H.register(MOD);
+  const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  G.AO3H = G.AO3H || {};
+  if (typeof G.AO3H.register === 'function') {
+    try { G.AO3H.register(MOD); } catch (e) { console.error('[AO3H] register failed', e); }
   } else {
-    T.AO3H.__pending = T.AO3H.__pending || [];
-    T.AO3H.__pending.push([MOD]);
+    // Core not ready yet → queue it for core’s finalRegister() to flush
+    G.AO3H.__pending = G.AO3H.__pending || [];
+    G.AO3H.__pending.push([MOD]);              // finalRegister(a,b) will get a=MOD, b=undefined
+    (G.AO3H.modules = G.AO3H.modules || {})[MOD.id] = MOD; // optional: visible in debug
   }
-
 })();
+
