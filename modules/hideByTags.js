@@ -30,8 +30,8 @@
     return toCanon(tag);
   }
 
-// ---- styles (fold/cut + inline icon + Manager panel + toast + commas) ----
-css`
+  /* ------------------------------ STYLES ------------------------------ */
+  css`
 /* Classic manager minimal styles */
 .${NS}-mgr-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .${NS}-btn{ border:1px solid #cfd6e4; background:#f5f7fb; border-radius:8px; padding:6px 10px; cursor:pointer; font-size:12px; }
@@ -40,6 +40,9 @@ css`
 .${NS}-list{ display:grid; gap:6px; margin-top:8px; }
 .${NS}-pill{ display:flex; align-items:center; justify-content:space-between; gap:10px;
   border:1px solid #e6e8ee; background:#fff; border-radius:10px; padding:6px 10px; }
+/* NEW: simple grid rows + spacing inside manager body */
+.${NS}-row{ display:grid; grid-template-columns: 1fr auto; gap:8px; }
+.${NS}-mgr-body{ display:grid; gap:8px; }
 
 /* ===================== FOLD / CUT ===================== */
 .${NS}-fold {
@@ -138,31 +141,17 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 }
 .${NS}-mgr h3 { margin:.2rem 0 .4rem; font-size:1rem; }
 
-/* Head: search + count */
+/* Head: search + count (kept in case you expand later) */
 .${NS}-ul-head { display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
 .${NS}-ul-search { border-radius: 8px; border:1px solid #cfd6e4; background:#fff; padding: 6px 10px; font-size:12px; }
 .${NS}-ul-count { font-weight:600; font-size:12px; color:#4b5563; }
 
-/* Actions */
-.${NS}-ul-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
-.${NS}-ul-btn {
-  height: 28px; padding: 0 10px; border-radius: 8px; border:1px solid #cfd6e4; background:#f5f7fb;
-  font-size:12px; cursor:pointer; transition: background .15s, transform .12s, border-color .15s;
-}
-.${NS}-ul-btn:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
-
 /* List area */
 .${NS}-ul-list { display:grid; gap:8px; max-height:none; overflow:visible; padding-right:2px; }
 
-/* Expandable groups */
-.${NS}-ul-group {
-  border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px;
-  display: flex; flex-direction: column; min-height: 25px;
-}
-.${NS}-ul-ghead {
-  display:inline; align-items:center; gap:8px; height:25px; padding:0 8px;
-  background:transparent; border:none; cursor:pointer; user-select:none;
-}
+/* Expandable groups (reserved for future grouping UI) */
+.${NS}-ul-group { border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px; display: flex; flex-direction: column; min-height: 25px; }
+.${NS}-ul-ghead { display:inline; align-items:center; gap:8px; height:25px; padding:0 8px; background:transparent; border:none; cursor:pointer; user-select:none; }
 .${NS}-ul-ghead:hover { background: rgba(0,0,0,.04); }
 .${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
 .${NS}-ul-chevron { display:inline-block; width:10px; min-width:10px; height:10px; transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px; }
@@ -173,7 +162,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 .${NS}-ul-gwrap { overflow:hidden; max-height:0; transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease; }
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-gwrap { max-height:1200px; border-top: 1px dashed #e7ebf5; }
 
-/* Rows */
+/* Rows inside groups */
 .${NS}-ul-gwrap { display:grid; gap:6px; }
 .${NS}-ul-row {
   display:grid; grid-template-columns: 1fr auto auto; align-items:center; gap:8px;
@@ -209,23 +198,6 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
   font-size:11px; z-index: 999999;
   opacity: 0; transition: opacity .15s ease; pointer-events: none;
 }
-
-/* Mini group picker */
-.${NS}-gp-pop {
-  position: absolute; z-index: 1000000;
-  min-width: 180px; max-width: 260px; max-height: 50vh; overflow: auto;
-  background: #fff; border: 1px solid #bbb; border-radius: 8px;
-  box-shadow: 0 6px 16px rgba(0,0,0,.2); padding: 6px;
-  font: 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-}
-.${NS}-gp-head { font-weight: 600; margin-bottom: 4px; text-align:center; }
-.${NS}-gp-list { display: grid; gap: 4px; }
-.${NS}-gp-item { display: flex; justify-content: space-between; padding: 4px 6px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; }
-.${NS}-gp-item:hover { background: #f4f6f9; }
-.${NS}-gp-input { width: 90%; margin-top: 6px; padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px;}
-.${NS}-gp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
-.${NS}-gp-btn { padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6; cursor: pointer; font-size: 11px; }
-.${NS}-gp-btn:hover { background:#e9ecf0; }
 
 /* Responsive */
 @media (max-width: 720px){
@@ -451,13 +423,13 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
         document.dispatchEvent(new CustomEvent(`${NS}:hideByTags-updated`));
       });
 
-      on($('#'+NS+'-hbt-export', mgrBox), 'click', async ()=>{
+      on($('#'+NS}-hbt-export', mgrBox), 'click', async ()=>{
         const blob = new Blob([JSON.stringify(await getList(), null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'ao3h-hide-tags.json';
-        a.click();
-        setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+        a.href = url; a.download = 'ao3h-hide-tags.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
       });
 
       on($('#'+NS+'-hbt-import', mgrBox), 'click', async ()=>{
@@ -493,7 +465,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
     const list = (await getList()).sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}));
     mgrList.innerHTML = '';
     mgrCount.textContent = `${list.length} tag${list.length!==1?'s':''}`;
-    list.forEach((t, idx)=>{
+    list.forEach((t)=>{
       const row = document.createElement('div');
       row.className = `${NS}-pill`;
       row.innerHTML = `<b>${t}</b>`;
