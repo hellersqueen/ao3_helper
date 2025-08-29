@@ -1,17 +1,21 @@
-/* modules/chapterWordCount.js — per-chapter word counts */
+/* modules/chapterWordCount.js — per-chapter word counts (compat AO3H core/menu) */
 ;(function(){
   'use strict';
 
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-  const AO3H = W.AO3H || {};
-  const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
+  const AO3H = window.AO3H || {};
+  const NS   = AO3H.env?.NS || 'ao3h';
 
-  const { onReady, observe, debounce, css, on } = (AO3H.util || {});
-  const dlog = (...a)=>{ if (AO3H.env?.DEBUG) console.log('[AO3H][ChapterWordCount]', ...a); };
+  const { onReady, observe, debounce, css, log, guard } = AO3H.util;
+  const Routes  = AO3H.routes;
+  const Flags   = AO3H.flags;
+
+  const MOD = 'ChapterWordCount';
+  const ENABLE_KEY = `mod:${MOD}:enabled`;
 
   let enabled = false;
+  let mo = null; // MutationObserver
 
-  // --- helpers ---
+  /* ---------------- helpers ---------------- */
   function collectMainUserstuffNodes(scopeEl){
     const all = Array.from(scopeEl.querySelectorAll('.userstuff'));
     return all.filter(usd => !usd.closest('.preface, .summary, .endnotes'));
@@ -29,15 +33,26 @@
     return countWordsFromText(textFromNodes(nodes));
   }
 
+  function ensureStyles(){
+    // injecte une seule fois
+    css(`
+      .${NS}-wc-badge{
+        margin:.5rem 0; font-size:0.95rem; opacity:.85;
+      }
+    `, 'chapter-wc-style');
+  }
+
   function insertBadge(afterEl, words, scope='chapter'){
     if (!afterEl) return;
+    // si badge déjà présent juste après, on le met à jour
     const next = afterEl.nextElementSibling;
-    if (next && next.classList?.contains(`${NS}-wc-badge`)) return;
-
+    if (next && next.classList?.contains(`${NS}-wc-badge`)) {
+      next.textContent = `~ ${Number(words).toLocaleString()} words in this ${scope}`;
+      return;
+    }
     const el = document.createElement('div');
     el.className = `${NS}-wc-badge`;
     el.textContent = `~ ${Number(words).toLocaleString()} words in this ${scope}`;
-    css`.${NS}-wc-badge{ margin:.5rem 0; font-size:0.95rem; opacity:.85; }`;
     afterEl.insertAdjacentElement('afterend', el);
   }
 
@@ -47,8 +62,7 @@
     if (!chapters.length) return false;
 
     chapters.forEach(ch => {
-      if (ch.querySelector(`.${NS}-wc-badge`)) return;
-      const words = countWordsFromChapterEl(ch);
+      const words  = countWordsFromChapterEl(ch);
       const header = ch.querySelector('h3.title, h2.heading, h3.heading, h2, h3') || ch;
       insertBadge(header, words, 'chapter');
     });
@@ -66,33 +80,50 @@
     insertBadge(anchor, words, 'chapter');
   }
 
-  function run(){
+  function runOnce(){
+    ensureStyles();
     const did = injectPerChapterBadges();
     if (!did) injectSingleChapterBadge();
   }
 
-  AO3H.register?.({
-    id: 'ChapterWordCount',
-    title: 'Chapter word count',
-    defaultFlagKey: 'chapterWordCount',
+  function start(){
+    if (!enabled) return;
+    // Agir uniquement sur les pages de works/chapters
+    if (!(Routes.isWork?.() || Routes.isChapter?.() || Routes.isWorkShow?.())) return;
 
-    init: async ({ enabled: onFlag }) => {
-      enabled = !!onFlag;
-      if (!enabled) return;
-      onReady(() => {
-        run();
-        observe(document.body, debounce(run, 250));
-      });
-    },
+    guard(() => {
+      // première passe
+      runOnce();
 
-    onFlagsUpdated: async ({ enabled: onFlag }) => {
-      enabled = !!onFlag;
-      if (!enabled) {
-        document.querySelectorAll(`.${NS}-wc-badge`).forEach(el => el.remove());
-      } else {
-        run();
-      }
-    },
+      // (re)brancher l’observer pour les modifs dynamiques
+      try { mo?.disconnect(); } catch {}
+      mo = observe(document.documentElement, { childList:true, subtree:true }, debounce(()=>{
+        if (!enabled) return;
+        runOnce();
+      }, 250));
+    }, `${MOD}:start`);
+  }
+
+  function stop(){
+    try { mo?.disconnect(); } catch {}
+    mo = null;
+    document.querySelectorAll(`.${NS}-wc-badge`).forEach(el => el.remove());
+  }
+
+  // Enregistrement module (compatible avec core/menu actuels)
+  AO3H.modules.register(MOD, { title: 'Chapter word count', enabledByDefault: true }, async function init(){
+    enabled = !!Flags.get(ENABLE_KEY, true);
+
+    onReady(() => { if (enabled) start(); });
+
+    // Toggle live depuis le menu
+    Flags.watch(ENABLE_KEY, (val)=>{
+      enabled = !!val;
+      if (enabled) start();
+      else stop();
+    });
+
+    log.info?.(`[${MOD}] ready`);
   });
 
 })();
