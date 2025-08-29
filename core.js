@@ -169,10 +169,12 @@
     'mod:SaveScroll:enabled': true,
   };
 
-  (async function boot(){
-    await Flags.init(DEFAULT_FLAGS);
-    Bus.emit('core:ready', { version: VERSION });
-    log.info('Core ready', VERSION);
-  })();
+(async function boot(){
+  await Flags.init(DEFAULT_FLAGS);
+  Bus.emit('core:ready', { version: VERSION });
+  await Modules.bootAll();                 // ← démarre effectivement les modules enregistrés
+  log.info('Core ready', VERSION);
+})();
+
 
 })();
