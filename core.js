@@ -1,252 +1,182 @@
-/* core.js — AO3 Helper core (namespace, utils, flags, registry, boot) */
 ;(function(){
   'use strict';
 
-  /* ========================== ENV & NAMESPACE ========================== */
-  const NS = 'ao3h';
-  const DEBUG = false;
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  /* ========================= ENV / NAMESPACE / LOG ========================= */
+  const NS      = 'ao3h';
+  const VERSION = '1.0.0';
+  const DEBUG   = false;               // mettre true pour le debug global
+  const LOG_LVL = 1;                   // 0: silent, 1: info, 2: debug
 
-  // public logger (quiet by default)
-  const dlog = (...a)=>{ if (DEBUG) console.log('[AO3H]', ...a); };
+  const log = {
+    info: (...a)=>{ if (LOG_LVL>=1) console.log('[AO3H]', ...a); },
+    dbg : (...a)=>{ if (DEBUG && LOG_LVL>=2) console.log('[AO3H][D]', ...a); },
+    warn: (...a)=>{ console.warn('[AO3H][!]', ...a); },
+    err : (...a)=>{ console.error('[AO3H][X]', ...a); },
+  };
 
-  /* ============================== UTILITIES ============================ */
+  /* ================================ UTILS ================================== */
   const onReady = (fn) => (document.readyState === 'loading')
-    ? document.addEventListener('DOMContentLoaded', fn, { once: true })
+    ? document.addEventListener('DOMContentLoaded', fn, {once:true})
     : fn();
 
   const $  = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
   const on = (el, evt, cb, opts) => el && el.addEventListener(evt, cb, opts);
+  const once = (el, evt, cb, opts)=> on(el, evt, (e)=>{ el.removeEventListener(evt, cb, opts); cb(e); }, opts);
+  const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+  const debounce = (fn,ms=200)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
+  const throttle = (fn,ms=200)=>{ let t=0; return (...a)=>{ const n=Date.now(); if(n-t>=ms){ t=n; fn(...a); } }; };
 
-  const debounce = (fn, ms=200)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
-  const throttle = (fn, ms=200)=>{ let t=0; return (...a)=>{ const n=Date.now(); if (n-t>ms){ t=n; fn(...a); } }; };
+  // Observe DOM changes — pratique pour AO3 (pages dynamiques Turbolinks)
+  function observe(root, opts, cb){
+    const ob = new MutationObserver(cb);
+    ob.observe(root || document.documentElement, opts || {childList:true,subtree:true});
+    return ob;
+  }
 
-  // Safe CSS injector (works at @run-at document-start even if <head> isn't parsed yet)
-  const css = (strings, ...vals) => {
-    const text = strings.map((s,i)=>s+(vals[i]??'')).join('');
-    if (typeof W.GM_addStyle === 'function') {
-      W.GM_addStyle(`/* ${NS} */\n${text}`);
-      return;
+  // CSS helper avec dédoublonnage par clé
+  const _cssKeys = new Set();
+  function css(str, key=`block-${_cssKeys.size}`){
+    if (_cssKeys.has(key)) return;
+    _cssKeys.add(key);
+    try { GM_addStyle(str); } catch { // fallback
+      const style = document.createElement('style');
+      style.textContent = str;
+      document.documentElement.appendChild(style);
     }
-    const apply = () => {
-      const el = document.createElement('style');
-      el.textContent = `/* ${NS} */\n${text}`;
-      (document.head || document.documentElement).appendChild(el);
-    };
-    if (document.head) apply();
-    else document.addEventListener('DOMContentLoaded', apply, { once:true });
-  };
+  }
 
-  // MutationObserver helper
-  const observe = (root, cb, opts={ childList:true, subtree:true }) => {
-    if (!root) return { disconnect(){/*noop*/} };
-    const mo = new MutationObserver(cb);
-    mo.observe(root, opts);
-    return mo;
-  };
-
-  /* ============================== STORAGE ============================== */
-  // Prefer GM_* (Tampermonkey) with graceful fallback to localStorage.
+  /* ============================== STORAGE ================================== */
   const Storage = {
-    key: (k) => `${NS}:${k}`,
-    async get(k, d=null){
-      try {
-        if (typeof W.GM_getValue === 'function') return await W.GM_getValue(this.key(k), d);
-      } catch {}
-      try {
-        const raw = localStorage.getItem(this.key(k));
-        return raw == null ? d : JSON.parse(raw);
-      } catch { return d; }
-    },
-    async set(k, v){
-      try {
-        if (typeof W.GM_setValue === 'function') return W.GM_setValue(this.key(k), v);
-      } catch {}
-      try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch {}
-    },
-    async del(k){
-      try {
-        if (typeof W.GM_deleteValue === 'function') return W.GM_deleteValue(this.key(k));
-      } catch {}
-      try { localStorage.removeItem(this.key(k)); } catch {}
-    },
+    key: (k)=> `${NS}:${k}`,
+    async get(k, d=null){ try { return await GM_getValue(this.key(k), d); } catch { return d; } },
+    async set(k, v){ try { GM_setValue(this.key(k), v); } catch(e){ log.err('GM_setValue failed', e); } return v; },
+    async del(k){ try { GM_deleteValue(this.key(k)); } catch(e){ log.err('GM_deleteValue failed', e); } },
+    // Miroir localStorage optionnel (utile pour restore manuel)
+    lsGet(k, d=null){ try { const v = localStorage.getItem(this.key(k)); return (v==null)?d:JSON.parse(v); } catch { return d; } },
+    lsSet(k, v){ try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch(e){ log.err('localStorage set failed', e); } return v; },
+    lsDel(k){ try { localStorage.removeItem(this.key(k)); } catch(e){ log.err('localStorage del failed', e); } },
   };
 
-  /* ============================== ROUTER =============================== */
-  const routes = {
-    path: () => location.pathname,
-    isWork: () => /^\/works\/\d+(?:\/chapters\/\d+)?$/.test(location.pathname),
-    isWorkShow: () => /^\/works\/\d+$/.test(location.pathname),
-    isChapter: () => /^\/works\/\d+\/chapters\/\d+$/.test(location.pathname),
-    isBookmarks: () => /^\/users\/[^/]+\/bookmarks/.test(location.pathname),
-
-    // Works listing (search/index) — used by AutoSearchFilters & HideByTags
-    isWorksIndex: () => /^\/works\/?$/.test(location.pathname),
-    isSearch: () => {
-      if (!/^\/works\/?$/.test(location.pathname)) return false;
-      const qs = new URLSearchParams(location.search);
-      return qs.has('work_search[query]') || location.search.includes('tag_id');
-    },
+  /* ================================ ROUTES ================================= */
+  // Aide pour cibler les pages AO3 (works, tags, search, etc.)
+  const Routes = {
+    href: ()=> location.href,
+    path: ()=> location.pathname,
+    isWork: ()=> /^\/works\/\d+/.test(location.pathname),
+    isWorkChapter: ()=> /^\/works\/\d+\/chapters\/\d+/.test(location.pathname),
+    isTagWorks: ()=> /^\/tags\/[^/]+\/works/.test(location.pathname),
+    isSearch: ()=> /\/works(\?.*search)/.test(location.href) || /work_search/.test(location.href),
+    // Ajoutez ici d’autres détecteurs selon besoin…
   };
 
-  /* ============================== FLAGS ================================ */
-  const Defaults = {
-    features: {
-      saveScroll: true,
-      chapterWordCount: true,
-      hideByTags: true,
-      autoSearchFilters: true,
-      hideFanficWithNotes: true,
+  /* ============================== EVENT BUS ================================ */
+  const Bus = (()=> {
+    const map = new Map(); // evt => Set<fn>
+    function on(evt, fn){ if(!map.has(evt)) map.set(evt, new Set()); map.get(evt).add(fn); }
+    function off(evt, fn){ const set = map.get(evt); if(set) set.delete(fn); }
+    function emit(evt, data){ const set = map.get(evt); if(set) for(const fn of set) { try{ fn(data);}catch(e){ log.err('Bus handler', e); } } }
+    return { on, off, emit };
+  })();
+
+  /* ============================ FLAGS / SETTINGS =========================== */
+  // Registry des options (bool/text/number/obj) + defaults + observers
+  const Flags = (()=> {
+    const DEF_KEY = 'flags';
+    let cache = null;
+    const watchers = new Map(); // key => Set<fn>
+
+    function _ensureLoaded(){ if (cache) return cache; cache = Storage.lsGet(DEF_KEY, null); return cache; }
+    async function _load(){ cache = await Storage.get(DEF_KEY, null); if(cache==null) cache = {}; Storage.lsSet(DEF_KEY, cache); return cache; }
+    function _notify(key, val){ const set = watchers.get(key); if(set) for(const fn of set) try{ fn(val);}catch(e){ log.err('flag watcher', e); } }
+
+    async function init(defaults={}){
+      const fromGM = await Storage.get(DEF_KEY, {});
+      cache = Object.assign({}, defaults, fromGM);
+      await Storage.set(DEF_KEY, cache);
+      Storage.lsSet(DEF_KEY, cache);
+      log.info('Flags initialized', cache);
     }
-  };
-
-  async function getFlags() {
-    const saved = await Storage.get('flags', null);
-    if (!saved) {
-      await Storage.set('flags', Defaults.features);
-      return { ...Defaults.features };
+    function getAll(){ return cache || _ensureLoaded() || {}; }
+    function get(key, d=null){ const all = getAll(); return (key in all)? all[key] : d; }
+    async function set(key, val){
+      const all = getAll(); all[key] = val;
+      await Storage.set(DEF_KEY, all);
+      Storage.lsSet(DEF_KEY, all);
+      _notify(key, val);
+      return val;
     }
-    const merged = { ...Defaults.features, ...saved };
-    // Backfill if new defaults were added later
-    if (JSON.stringify(merged) !== JSON.stringify(saved)) await Storage.set('flags', merged);
-    return merged;
-  }
+    function watch(key, fn){
+      if(!watchers.has(key)) watchers.set(key, new Set());
+      watchers.get(key).add(fn);
+      return ()=> watchers.get(key)?.delete(fn);
+    }
+    return { init, getAll, get, set, watch };
+  })();
 
-  async function setFlag(key, val){
-    const flags = await getFlags();
-    flags[key] = !!val;
-    await Storage.set('flags', flags);
-    // notify listeners (menu, modules)
-    document.dispatchEvent(new CustomEvent(`${NS}:flags-updated`, { detail: flags }));
-    return flags;
-  }
-
-  /* =========================== MODULE REGISTRY ========================== */
-  // Modules call AO3H.register({ id, title, init, onFlagsUpdated?, defaultFlagKey? })
-  const _queue = [];
-  let _realRegistrarInstalled = false;
-
-  function _getFlagForModule(flags, mod){
-    // Prefer explicit defaultFlagKey; else try to derive from id in a lenient way.
-    if (mod.defaultFlagKey && mod.defaultFlagKey in flags) return !!flags[mod.defaultFlagKey];
-    const guess = String(mod.id || '').charAt(0).toLowerCase() + String(mod.id || '').slice(1);
-    return (guess in flags) ? !!flags[guess] : true; // default ON if unknown
-  }
-
-  // Allow menu.js to provide a settings root element (mount point for per-module panels)
-  let _settingsRoot = null;
-  function provideSettingsRoot(el){
-    _settingsRoot = el || null;
-  }
-
-  function installRealRegistrar(){
-    if (_realRegistrarInstalled) return;
-    _realRegistrarInstalled = true;
-
-    // Replace stub with real function that stores modules and (if booted) can init them later if needed.
-    AO3H.register = (mod) => {
-      if (!mod || !mod.id) return;
-      _queue.push(mod);
-      dlog('registered module:', mod.id);
-    };
-
-    // Let dependents know register is ready
-    document.dispatchEvent(new CustomEvent(`${NS}:register-ready`));
-  }
-
-  /* =============================== BOOT ================================= */
-  // Build AO3H object early so other files can attach even before boot.
-  const AO3H = W.AO3H || (W.AO3H = {});
-  AO3H.env   = { NS, DEBUG };
-  AO3H.util  = AO3H.util  || { $, $$, on, onReady, debounce, throttle, css, observe };
-  AO3H.store = AO3H.store || Storage;
-  AO3H.routes= AO3H.routes|| routes;
-
-  // Temporary stub: queue modules until real registrar is installed
-  if (typeof AO3H.register !== 'function') {
-    AO3H.register = (mod) => { _queue.push(mod); };
-  }
-
-  // Flags API (menu.js uses these)
-  AO3H.flags = {
-    Defaults,
-    get: getFlags,
-    set: setFlag,
-  };
-
-  // Menu -> core hook to hand over a mount node for settings panels
-  AO3H.provideSettingsRoot = provideSettingsRoot;
-
-  // Optional: soft-navigation signal for modules that need to re-run on PJAX
-  AO3H.signalNavigated = () => {
-    document.dispatchEvent(new CustomEvent(`${NS}:navigated`));
-  };
-
-  installRealRegistrar();
-
-  // Main boot: wait for menu (optionally) to announce its mount, then init modules with flags
-  onReady(async () => {
-    const flags = await getFlags();
-
-    // Notify that flags are available very early (menu can read these)
-    document.dispatchEvent(new CustomEvent(`${NS}:boot-flags-ready`, { detail: flags }));
-
-    // If menu.js will provide a settings root, give it a moment to load and call AO3H.provideSettingsRoot(...)
-    let booted = false;
-
-    const initAll = async () => {
-      if (booted) return;
-      booted = true;
-
-      // Initialize each registered module
-      for (const mod of _queue) {
-        try {
-          const enabled = _getFlagForModule(flags, mod);
-          // Give modules a chance to mount settings panel inside the menu's container (if provided)
-          await Promise.resolve(mod.init && mod.init({ enabled, settingsRoot: _settingsRoot }));
-          dlog('init ->', mod.id, 'enabled=', enabled);
-        } catch (e) {
-          console.error(`[AO3H] Module init failed (${mod.id}):`, e);
+  /* =========================== MODULE REGISTRY ============================ */
+  // Chaque module s’enregistre: name, meta, init(), enable flag auto
+  const Modules = (()=> {
+    const list = new Map(); // name => { meta, init, enabledKey }
+    function register(name, meta, init){
+      if(list.has(name)){ log.warn('Module already registered', name); return; }
+      const enabledKey = `mod:${name}:enabled`;
+      list.set(name, { meta: meta||{}, init, enabledKey });
+    }
+    function all(){ return Array.from(list.entries()).map(([name, m])=>({name, ...m})); }
+    async function bootAll(){
+      for (const [name, m] of list){
+        const on = !!Flags.get(m.enabledKey, !!m.meta?.enabledByDefault);
+        if (on) {
+          try { log.info(`Boot ${name}`); await m.init?.(); Bus.emit('module:started', {name}); }
+          catch(e){ log.err(`Module ${name} failed`, e); }
+        } else {
+          log.dbg(`Skip ${name} (disabled)`);
         }
       }
-
-      // Wire global flag updates to module handlers
-      document.addEventListener(`${NS}:flags-updated`, async (e) => {
-        const f = e && e.detail ? e.detail : await getFlags();
-        for (const mod of _queue) {
-          try {
-            const enabled = _getFlagForModule(f, mod);
-            mod.onFlagsUpdated && mod.onFlagsUpdated({ enabled, settingsRoot: _settingsRoot });
-          } catch (err) {
-            console.error(`[AO3H] Module onFlagsUpdated failed (${mod.id}):`, err);
-          }
-        }
-      });
-    };
-
-    // If menu has already provided the settings root, init immediately.
-    if (_settingsRoot) {
-      initAll();
-      return;
     }
+    return { register, all, bootAll };
+  })();
 
-    // Otherwise, wait briefly for menu to report a settings mount; then continue regardless.
-    let waited = false;
-    const kick = () => { if (!waited) { waited = true; initAll(); } };
+  /* ============================== STYLES BASE ============================= */
+  css(`
+    :root { --${NS}-ink:#222; --${NS}-bg:#111a; --${NS}-accent:#c21; }
+    .${NS}-hidden { display:none !important; }
+  `, 'base-colors');
 
-    // Menu is expected to dispatch `${NS}:menu-ready` with { detail: { settingsRoot } }
-    const onMenuReady = (ev) => {
-      try {
-        if (ev?.detail?.settingsRoot) provideSettingsRoot(ev.detail.settingsRoot);
-      } catch {}
-      kick();
-      document.removeEventListener(`${NS}:menu-ready`, onMenuReady);
-    };
-    document.addEventListener(`${NS}:menu-ready`, onMenuReady, { once: true });
+  /* =============================== EXPORTS ================================ */
+  // Expose un objet unique global, stable et documenté
+  window.AO3H = {
+    // env/config
+    env: { NS, VERSION, DEBUG },
+    // libs
+    util: { $, $$, on, once, onReady, observe, debounce, throttle, sleep, css, log },
+    store: Storage,
+    routes: Routes,
+    bus: Bus,
+    // settings
+    flags: Flags,
+    // modules
+    modules: Modules,
+    // API pour menu.js (sera remplie par menu.js)
+    menu: { addSection: ()=>{}, rebuild: ()=>{} },
+  };
 
-    // Safety timeout: don't block boot if menu loads much later or isn't present.
-    setTimeout(kick, 700);
-  });
+  /* =============================== BOOT =================================== */
+  // 1) Initialiser defaults (clé unique == stable) — ajoutez vos défauts ici.
+  const DEFAULT_FLAGS = {
+    // Toggles “globaux”
+    'ui:showMenuButton': true,
+
+    // Exemple de modules (à créer plus tard)
+    'mod:example:enabled': true,
+  };
+
+  (async function boot(){
+    await Flags.init(DEFAULT_FLAGS);
+    // Signaler qu’on peut enregistrer des modules avant DOM ready si besoin
+    Bus.emit('core:ready', { version: VERSION });
+    log.info('Core ready', VERSION);
+  })();
 
 })();
