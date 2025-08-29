@@ -3,8 +3,8 @@
 
   /* ========================= ENV / NAMESPACE / LOG ========================= */
   const NS      = 'ao3h';
-  const VERSION = '1.0.0';
-  const DEBUG   = false;               // mettre true pour le debug global
+  const VERSION = '1.1.0';
+  const DEBUG   = false;               // true pour debug global
   const LOG_LVL = 1;                   // 0: silent, 1: info, 2: debug
 
   const log = {
@@ -27,19 +27,18 @@
   const debounce = (fn,ms=200)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
   const throttle = (fn,ms=200)=>{ let t=0; return (...a)=>{ const n=Date.now(); if(n-t>=ms){ t=n; fn(...a); } }; };
 
-  // Observe DOM changes — pratique pour AO3 (pages dynamiques Turbolinks)
   function observe(root, opts, cb){
     const ob = new MutationObserver(cb);
     ob.observe(root || document.documentElement, opts || {childList:true,subtree:true});
     return ob;
   }
 
-  // CSS helper avec dédoublonnage par clé
+  // CSS helper (clé = pour éviter doublons si ré-injecté)
   const _cssKeys = new Set();
   function css(str, key=`block-${_cssKeys.size}`){
     if (_cssKeys.has(key)) return;
     _cssKeys.add(key);
-    try { GM_addStyle(str); } catch { // fallback
+    try { GM_addStyle(str); } catch {
       const style = document.createElement('style');
       style.textContent = str;
       document.documentElement.appendChild(style);
@@ -52,22 +51,22 @@
     async get(k, d=null){ try { return await GM_getValue(this.key(k), d); } catch { return d; } },
     async set(k, v){ try { GM_setValue(this.key(k), v); } catch(e){ log.err('GM_setValue failed', e); } return v; },
     async del(k){ try { GM_deleteValue(this.key(k)); } catch(e){ log.err('GM_deleteValue failed', e); } },
-    // Miroir localStorage optionnel (utile pour restore manuel)
-    lsGet(k, d=null){ try { const v = localStorage.getItem(this.key(k)); return (v==null)?d:JSON.parse(v); } catch { return d; } },
-    lsSet(k, v){ try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch(e){ log.err('localStorage set failed', e); } return v; },
-    lsDel(k){ try { localStorage.removeItem(this.key(k)); } catch(e){ log.err('localStorage del failed', e); } },
+    // miroirs LS (optionnels)
+    lsGet(k, d=null){ try { const v = localStorage.getItem(this.key(k)); return v==null?d:JSON.parse(v); } catch { return d; } },
+    lsSet(k, v){ try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch(e){ log.err('ls set failed', e); } return v; },
+    lsDel(k){ try { localStorage.removeItem(this.key(k)); } catch(e){ log.err('ls del failed', e); } },
   };
 
   /* ================================ ROUTES ================================= */
-  // Aide pour cibler les pages AO3 (works, tags, search, etc.)
   const Routes = {
     href: ()=> location.href,
     path: ()=> location.pathname,
-    isWork: ()=> /^\/works\/\d+/.test(location.pathname),
-    isWorkChapter: ()=> /^\/works\/\d+\/chapters\/\d+/.test(location.pathname),
+    isWork: ()=> /^\/works\/\d+(?:\/chapters\/\d+)?$/.test(location.pathname),
+    isWorkShow: ()=> /^\/works\/\d+$/.test(location.pathname),
+    isChapter: ()=> /^\/works\/\d+\/chapters\/\d+$/.test(location.pathname),
     isTagWorks: ()=> /^\/tags\/[^/]+\/works/.test(location.pathname),
-    isSearch: ()=> /\/works(\?.*search)/.test(location.href) || /work_search/.test(location.href),
-    // Ajoutez ici d’autres détecteurs selon besoin…
+    isSearch: ()=> /^\/works$/.test(location.pathname) && (new URLSearchParams(location.search).has('work_search[query]') || location.search.includes('tag_id')),
+    isBookmarks: ()=> /^\/users\/[^/]+\/bookmarks/.test(location.pathname),
   };
 
   /* ============================== EVENT BUS ================================ */
@@ -79,17 +78,23 @@
     return { on, off, emit };
   })();
 
+  /* ========================= guard() GLOBAL UTILE ========================== */
+  async function guard(fn, label=''){
+    try { return await fn(); }
+    catch(e){
+      console.error('[AO3H][guard]', label, e);
+      try { Bus.emit('error', { label, error:e }); } catch {}
+      return undefined;
+    }
+  }
+
   /* ============================ FLAGS / SETTINGS =========================== */
-  // Registry des options (bool/text/number/obj) + defaults + observers
   const Flags = (()=> {
     const DEF_KEY = 'flags';
     let cache = null;
     const watchers = new Map(); // key => Set<fn>
 
     function _ensureLoaded(){ if (cache) return cache; cache = Storage.lsGet(DEF_KEY, null); return cache; }
-    async function _load(){ cache = await Storage.get(DEF_KEY, null); if(cache==null) cache = {}; Storage.lsSet(DEF_KEY, cache); return cache; }
-    function _notify(key, val){ const set = watchers.get(key); if(set) for(const fn of set) try{ fn(val);}catch(e){ log.err('flag watcher', e); } }
-
     async function init(defaults={}){
       const fromGM = await Storage.get(DEF_KEY, {});
       cache = Object.assign({}, defaults, fromGM);
@@ -103,7 +108,8 @@
       const all = getAll(); all[key] = val;
       await Storage.set(DEF_KEY, all);
       Storage.lsSet(DEF_KEY, all);
-      _notify(key, val);
+      const set = watchers.get(key);
+      if (set) for (const fn of set) try{ fn(val); }catch(e){ log.err('flag watcher', e); }
       return val;
     }
     function watch(key, fn){
@@ -115,24 +121,23 @@
   })();
 
   /* =========================== MODULE REGISTRY ============================ */
-  // Chaque module s’enregistre: name, meta, init(), enable flag auto
   const Modules = (()=> {
     const list = new Map(); // name => { meta, init, enabledKey }
     function register(name, meta, init){
-      if(list.has(name)){ log.warn('Module already registered', name); return; }
+      if (list.has(name)) { log.warn('Module already registered', name); return; }
       const enabledKey = `mod:${name}:enabled`;
       list.set(name, { meta: meta||{}, init, enabledKey });
     }
     function all(){ return Array.from(list.entries()).map(([name, m])=>({name, ...m})); }
     async function bootAll(){
       for (const [name, m] of list){
-        const on = !!Flags.get(m.enabledKey, !!m.meta?.enabledByDefault);
-        if (on) {
-          try { log.info(`Boot ${name}`); await m.init?.(); Bus.emit('module:started', {name}); }
-          catch(e){ log.err(`Module ${name} failed`, e); }
-        } else {
-          log.dbg(`Skip ${name} (disabled)`);
-        }
+        const shouldOn = !!Flags.get(m.enabledKey, !!m.meta?.enabledByDefault);
+        if (!shouldOn) { log.dbg(`Skip ${name} (disabled)`); continue; }
+        await guard(async ()=>{
+          log.info(`Boot ${name}`);
+          await m.init?.();
+          Bus.emit('module:started', { name });
+        }, `init:${name}`);
       }
     }
     return { register, all, bootAll };
@@ -145,36 +150,27 @@
   `, 'base-colors');
 
   /* =============================== EXPORTS ================================ */
-  // Expose un objet unique global, stable et documenté
   window.AO3H = {
-    // env/config
     env: { NS, VERSION, DEBUG },
-    // libs
-    util: { $, $$, on, once, onReady, observe, debounce, throttle, sleep, css, log },
+    util: { $, $$, on, once, onReady, observe, debounce, throttle, sleep, css, log, guard },
     store: Storage,
     routes: Routes,
     bus: Bus,
-    // settings
     flags: Flags,
-    // modules
     modules: Modules,
-    // API pour menu.js (sera remplie par menu.js)
-    menu: { addSection: ()=>{}, rebuild: ()=>{} },
+    // API de menu complétée par menu.js
+    menu: { addToggle:()=>{}, addAction:()=>{}, addSeparator:()=>{}, rebuild:()=>{} },
   };
 
   /* =============================== BOOT =================================== */
-  // 1) Initialiser defaults (clé unique == stable) — ajoutez vos défauts ici.
   const DEFAULT_FLAGS = {
-    // Toggles “globaux”
-    'ui:showMenuButton': true,
-
-    // Exemple de modules (à créer plus tard)
-    'mod:example:enabled': true,
+    'ui:showMenuButton': false, // pas de bouton flottant dans ce skin
+    // exemples (modules)
+    'mod:SaveScroll:enabled': true,
   };
 
   (async function boot(){
     await Flags.init(DEFAULT_FLAGS);
-    // Signaler qu’on peut enregistrer des modules avant DOM ready si besoin
     Bus.emit('core:ready', { version: VERSION });
     log.info('Core ready', VERSION);
   })();
