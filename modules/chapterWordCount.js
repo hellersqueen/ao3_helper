@@ -1,4 +1,4 @@
-/* modules/chapterWordCount.js — per-chapter word counts (safe & robust) */
+/* modules/chapterWordCount.js — per-chapter word counts (safe + fallback “between chapters”) */
 ;(function(){
   'use strict';
 
@@ -14,7 +14,7 @@
 
   let enabled = false;
 
-  // Passes temporisées (0 boucle)
+  // 3 passes pour laisser le DOM se stabiliser
   let tries = 0;
   const MAX_TRIES = 3;
   const DELAY_MS  = 700;
@@ -24,29 +24,46 @@
     if (!text) return 0;
     const s = text.replace(/\s+/g, ' ').trim();
     if (!s) return 0;
+    // Regex Unicode + fallback simple
     let tokens = null;
-    try { tokens = s.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu); } catch {}
+    try { tokens = s.match(/[\p{L}\p{N}’'-]+/gu); } catch {}
     if (!tokens) tokens = s.match(/\S+/g);
     return tokens ? tokens.length : 0;
   }
 
-function wordsForChapter(ch){
-  // 1) EXACTEMENT comme l'ancien : userstuff hors preface/summary/endnotes
-  const all = Array.from(ch.querySelectorAll('.userstuff'));
-  const main = all.filter(usd => !usd.closest('.preface, .summary, .endnotes'));
-  const used = main.length ? main : all;
+  // userstuff à l’intérieur du bloc .chapter (exclut preface/summary/endnotes)
+  function userstuffsInsideChapter(ch){
+    const all = Array.from(ch.querySelectorAll('.userstuff'));
+    const main = all.filter(el => !el.closest('.preface, .summary, .endnotes'));
+    return (main.length ? main : all);
+  }
 
-  // 2) EXACTEMENT comme l'ancien : innerText (pas textContent)
-  const text = used.map(n => n.innerText || '').join('\n');
+  // Fallback : si le contenu n’est PAS dans .chapter, on prend les frères suivants
+  // jusqu’au prochain .chapter (ou fin) et on y cherche des .userstuff.
+  function userstuffsBetweenChapters(ch){
+    const parent = ch.parentElement;
+    if (!parent) return [];
+    const out = [];
+    for (let n = ch.nextElementSibling; n; n = n.nextElementSibling){
+      if (n.classList?.contains('chapter')) break; // prochain chapitre → stop
+      if (n.matches?.('.userstuff')) out.push(n);
+      out.push(...(n.querySelectorAll?.('.userstuff') || []));
+    }
+    // filtre preface/endnotes/summary
+    const main = out.filter(el => !el.closest('.preface, .summary, .endnotes'));
+    return (main.length ? main : out);
+  }
 
-  // 3) EXACTEMENT comme l'ancien : regex Unicode, avec fallback
-  let m = null;
-  try { m = text.match(/[\p{L}\p{N}’'-]+/gu); } catch {}
-  if (!m) m = text.match(/\S+/g);
+  function textFromNodes(nodes){
+    return nodes.map(n => n.innerText || '').join('\n'); // comme ton ancien script
+  }
 
-  return m ? m.length : 0;
-}
-
+  function wordsForChapter(ch){
+    let nodes = userstuffsInsideChapter(ch);
+    if (!nodes.length) nodes = userstuffsBetweenChapters(ch);
+    const text = textFromNodes(nodes);
+    return countWordsFromText(text);
+  }
 
   function ensureStyles(){
     css(`.${NS}-wc-badge{ margin:.5rem 0; font-size:.95rem; opacity:.85; }`, 'chapter-wc-style');
@@ -81,8 +98,8 @@ function wordsForChapter(ch){
     ensureStyles();
 
     // 1) Pages multi-chapitres
-    let chapters = Array.from(document.querySelectorAll('#workskin .chapter'));
-    if (!chapters.length) chapters = Array.from(document.querySelectorAll('#chapters .chapter'));
+    let chapters = Array.from(document.querySelectorAll('#chapters .chapter'));
+    if (!chapters.length) chapters = Array.from(document.querySelectorAll('#workskin .chapter'));
 
     if (chapters.length){
       for (const ch of chapters){
@@ -93,13 +110,13 @@ function wordsForChapter(ch){
       return;
     }
 
-    // 2) Page simple (une seule section)
+    // 2) Page simple (une seule section) : somme de tout le userstuff principal
     const workskin = document.getElementById('workskin') || document.querySelector('#workskin');
     if (workskin){
-      const text = Array.from(workskin.querySelectorAll('.userstuff'))
-        .filter(el => !el.closest('.preface') && !el.closest('.endnotes'))
-        .map(el => el.textContent || '')
-        .join('\n');
+      const all = Array.from(workskin.querySelectorAll('.userstuff'));
+      const main = all.filter(el => !el.closest('.preface, .summary, .endnotes'));
+      const used = main.length ? main : all;
+      const text = textFromNodes(used);
       const words = countWordsFromText(text);
       const anchor =
         workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading') ||
@@ -116,7 +133,7 @@ function wordsForChapter(ch){
     else setTimeout(()=>{ once(); again(); }, 0);
   }
 
-  function start(){ scheduleRuns(); log.info?.(`[${MOD}] started (safe)`); }
+  function start(){ scheduleRuns(); log.info?.(`[${MOD}] started (safe+fallback)`); }
   function stop(){
     document.querySelectorAll(`[data-ao3h-mod="${MOD}"], .${NS}-wc-badge`).forEach(el => el.remove());
     log.info?.(`[${MOD}] stopped`);
