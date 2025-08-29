@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         AO3 Helper - Menu (Header Dropdown, Robust CSS)
+// @name         AO3 Helper - Menu (Header Dropdown, Robust CSS, Fixed)
 // @namespace    ao3h
-// @version      1.2.1
+// @version      1.2.2
 // @description  Onglet AO3 Helper dans l’entête: toggles auto + API, injecteur CSS compatible.
 // @match        https://archiveofourown.org/*
 // @grant        GM_addStyle
@@ -22,28 +22,22 @@
     ? document.addEventListener('DOMContentLoaded', fn, {once:true})
     : fn());
 
-  // Injecteur CSS compatible:
-  // - usage tagged:  injectCSS`...`
-  // - usage string:  injectCSS("...")
-  // - accepte un 2e argument "key" (ignoré si GM_addStyle est utilisé)
+  // Injecteur CSS compatible (tagged template OU string)
   function injectCSS(first, ...rest){
     let cssText = '';
     if (Array.isArray(first) && Object.prototype.hasOwnProperty.call(first, 'raw')) {
-      // tagged template: (strings, ...vals)
       const strings = first, vals = rest;
       cssText = strings.map((s,i)=> s + (i<vals.length ? vals[i] : '')).join('');
     } else {
-      // appel normal: (text [, key])
       cssText = String(first ?? '');
     }
-    try {
-      if (typeof GM_addStyle === 'function') { GM_addStyle(cssText); return; }
-    } catch {}
+    try { if (typeof GM_addStyle === 'function') { GM_addStyle(cssText); return; } } catch {}
     const el = document.createElement('style');
     el.textContent = cssText;
     (document.head || document.documentElement).appendChild(el);
   }
 
+  // ❗️Déclarées UNE seule fois
   const Flags   = AO3H.flags;
   const Modules = AO3H.modules;
 
@@ -129,9 +123,6 @@
   /* ===================== MENU BUILD (+ API publique) ===================== */
   let rootLI, toggleEl, menuUL;
   const customItems = []; // {type:'toggle'|'action'|'sep', label, hint, flagKey, defaultOn, handler}
-
-  const Flags   = AO3H.flags;
-  const Modules = AO3H.modules;
 
   function itemToggle(label, flagKey, current){
     const li = document.createElement('li');
@@ -262,7 +253,7 @@
     fillMenu();
   }
 
-  // API publique unchanged
+  // API publique (pour ajouter des éléments depuis d'autres scripts)
   function addToggle(flagKey, label, defaultOn=false){ customItems.push({ type:'toggle', flagKey, label, defaultOn }); if (menuUL) fillMenu(); }
   function addAction(label, handler, hint=''){ customItems.push({ type:'action', label, handler, hint }); if (menuUL) fillMenu(); }
   function addSeparator(){ customItems.push({ type:'sep' }); if (menuUL) fillMenu(); }
@@ -272,12 +263,10 @@
   onReady(()=>{
     try {
       buildMenu();
-      try {
-        GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
-          const tab = document.querySelector(`li.${NS}-root`);
-          tab?.dispatchEvent(new Event('mouseenter'));
-        });
-      } catch {}
+      GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
+        const tab = document.querySelector(`li.${NS}-root`);
+        tab?.dispatchEvent(new Event('mouseenter'));
+      });
     } catch (err) {
       console.error('[AO3H][menu] build failed', err);
     }
