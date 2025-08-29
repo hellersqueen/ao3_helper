@@ -152,15 +152,7 @@
 
     // --- Import/Export hidden works (ouvre le dialog lazy) ---
     menu.appendChild(itemAction('Hidden works…', 'Import / Export', openIE));
-
-    // --- Option: ouvrir le panneau de réglages (si tu gardes un panel ailleurs) ---
-    if (AO3H.menu?.rebuild) {
-      menu.appendChild(itemAction('Open settings panel…', 'Ctrl+Alt+M', ()=>{
-        // ton autre panneau si tu veux le conserver
-        document.dispatchEvent(new KeyboardEvent('keydown', {ctrlKey:true, altKey:true, key:'m'}));
-      }));
-    }
-
+    
     li.append(toggle, menu);
 
     // Ouverture/fermeture
