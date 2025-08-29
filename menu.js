@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         AO3 Helper - Menu (Header Dropdown, Robust CSS, Fixed)
+// @name         AO3 Helper - Menu (Header Dropdown, Anticollision)
 // @namespace    ao3h
-// @version      1.2.2
-// @description  Onglet AO3 Helper dans l’entête: toggles auto + API, injecteur CSS compatible.
+// @version      1.2.3
+// @description  Onglet AO3 Helper dans l’entête: toggles auto + API, aucun alias global ambigu.
 // @match        https://archiveofourown.org/*
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
@@ -12,18 +12,19 @@
 ;(function () {
   'use strict';
 
+  // Références de base
   const AO3H = window.AO3H || {};
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
 
-  // --- Helpers locaux robustes (ne dépendent pas du core) ---
-  const $  = (AO3H.util && AO3H.util.$)  || ((s,r=document)=>r.querySelector(s));
-  const on = (AO3H.util && AO3H.util.on) || ((el,e,cb,o)=>el&&el.addEventListener(e,cb,o));
-  const onReady = (AO3H.util && AO3H.util.onReady) || (fn => (document.readyState==='loading')
+  // Helpers locaux minimalistes (pas d'alias "Flags"/"Modules")
+  const M_$  = (AO3H.util && AO3H.util.$)  || ((s,r=document)=>r.querySelector(s));
+  const M_on = (AO3H.util && AO3H.util.on) || ((el,e,cb,o)=>el&&el.addEventListener(e,cb,o));
+  const M_onReady = (AO3H.util && AO3H.util.onReady) || (fn => (document.readyState==='loading')
     ? document.addEventListener('DOMContentLoaded', fn, {once:true})
     : fn());
 
-  // Injecteur CSS compatible (tagged template OU string)
-  function injectCSS(first, ...rest){
+  // Injecteur CSS (compatible tagged template OU string), nom unique
+  function M_injectCSS(first, ...rest){
     let cssText = '';
     if (Array.isArray(first) && Object.prototype.hasOwnProperty.call(first, 'raw')) {
       const strings = first, vals = rest;
@@ -37,12 +38,12 @@
     (document.head || document.documentElement).appendChild(el);
   }
 
-  // ❗️Déclarées UNE seule fois
-  const Flags   = AO3H.flags;
-  const Modules = AO3H.modules;
+  // Accès directs (pas d'alias courts pour éviter collisions)
+  const M_FLAGS   = AO3H.flags;
+  const M_MODULES = AO3H.modules;
 
   /* ============================== STYLES ============================== */
-  injectCSS`
+  M_injectCSS`
   :root{
     --${NS}-gap: .75rem;
     --${NS}-pad-y: .5em;
@@ -121,8 +122,8 @@
   }
 
   /* ===================== MENU BUILD (+ API publique) ===================== */
-  let rootLI, toggleEl, menuUL;
-  const customItems = []; // {type:'toggle'|'action'|'sep', label, hint, flagKey, defaultOn, handler}
+  let M_rootLI, M_toggleEl, M_menuUL;
+  const M_customItems = []; // {type:'toggle'|'action'|'sep', label, hint, flagKey, defaultOn, handler}
 
   function itemToggle(label, flagKey, current){
     const li = document.createElement('li');
@@ -140,7 +141,7 @@
     const a  = document.createElement('a');
     a.href = '#';
     a.innerHTML = `<span class="${NS}-label">${label}</span>${hint ? `<span class="${NS}-kbd">${hint}</span>` : ''}`;
-    on(a, 'click', (e)=>{ e.preventDefault(); handler?.(); closeMenu(); });
+    M_on(a, 'click', (e)=>{ e.preventDefault(); handler?.(); closeMenu(); });
     li.appendChild(a);
     return li;
   }
@@ -151,88 +152,91 @@
   }
 
   function fillMenu(){
-    menuUL.innerHTML = '';
+    M_menuUL.innerHTML = '';
 
     // 1) Toggles auto pour les modules
-    const mods = (Modules && Modules.all ? Modules.all() : []);
+    const mods = (M_MODULES && M_MODULES.all ? M_MODULES.all() : []);
     if (mods.length){
       for (const { name, meta, enabledKey } of mods){
-        const onNow = !!Flags.get(enabledKey, !!meta?.enabledByDefault);
-        menuUL.appendChild(itemToggle(meta?.title || name, enabledKey, onNow));
+        const onNow = !!M_FLAGS.get(enabledKey, !!meta?.enabledByDefault);
+        M_menuUL.appendChild(itemToggle(meta?.title || name, enabledKey, onNow));
       }
     } else {
-      menuUL.appendChild(itemAction('No modules registered', '', ()=>{}));
+      M_menuUL.appendChild(itemAction('No modules registered', '', ()=>{}));
     }
 
     // 2) Séparateur
-    menuUL.appendChild(itemDivider());
+    M_menuUL.appendChild(itemDivider());
 
     // 3) Items custom ajoutés par d’autres scripts
-    for (const it of customItems){
-      if (it.type === 'sep') { menuUL.appendChild(itemDivider()); continue; }
+    for (const it of M_customItems){
+      if (it.type === 'sep') { M_menuUL.appendChild(itemDivider()); continue; }
       if (it.type === 'toggle'){
-        const onNow = !!Flags.get(it.flagKey, !!it.defaultOn);
-        menuUL.appendChild(itemToggle(it.label, it.flagKey, onNow));
+        const onNow = !!M_FLAGS.get(it.flagKey, !!it.defaultOn);
+        M_menuUL.appendChild(itemToggle(it.label, it.flagKey, onNow));
         continue;
       }
       if (it.type === 'action'){
-        menuUL.appendChild(itemAction(it.label, it.hint, it.handler));
+        M_menuUL.appendChild(itemAction(it.label, it.hint, it.handler));
         continue;
       }
     }
 
     // 4) Import/Export (si fonctions présentes)
     if (window.ao3hExportHiddenWorks || window.ao3hImportHiddenWorks) {
-      if (menuUL.lastElementChild?.className !== `${NS}-divider`) menuUL.appendChild(itemDivider());
-      menuUL.appendChild(itemAction('Hidden works…', 'Import / Export', openIE));
+      if (M_menuUL.lastElementChild?.className !== `${NS}-divider`) M_menuUL.appendChild(itemDivider());
+      M_menuUL.appendChild(itemAction('Hidden works…', 'Import / Export', openIE));
     }
   }
 
-  function openMenu(){ rootLI.classList.add('open'); toggleEl.setAttribute('aria-expanded','true'); }
-  function closeMenu(){ rootLI.classList.remove('open'); toggleEl.setAttribute('aria-expanded','false'); }
+  function openMenu(){ M_rootLI.classList.add('open'); M_toggleEl.setAttribute('aria-expanded','true'); }
+  function closeMenu(){ M_rootLI.classList.remove('open'); M_toggleEl.setAttribute('aria-expanded','false'); }
 
   function buildMenu(){
     if (document.querySelector(`li.${NS}-root`)) return;
 
-    rootLI = document.createElement('li');
-    rootLI.className = `dropdown ${NS}-root`;
-    rootLI.setAttribute('aria-haspopup', 'true');
-    rootLI.tabIndex = 0;
+    M_rootLI = document.createElement('li');
+    M_rootLI.className = `dropdown ${NS}-root`;
+    M_rootLI.setAttribute('aria-haspopup', 'true');
+    M_rootLI.tabIndex = 0;
 
-    toggleEl = document.createElement('span');
-    toggleEl.className = `${NS}-navlink`;
-    toggleEl.textContent = 'AO3 Helper';
-    toggleEl.setAttribute('aria-hidden', 'true');
+    M_toggleEl = document.createElement('span');
+    M_toggleEl.className = `${NS}-navlink`;
+    M_toggleEl.textContent = 'AO3 Helper';
+    M_toggleEl.setAttribute('aria-hidden', 'true');
 
-    menuUL = document.createElement('ul');
-    menuUL.className = `menu dropdown-menu ${NS}-menu`;
-    menuUL.setAttribute('role', 'menu');
+    M_menuUL = document.createElement('ul');
+    M_menuUL.className = `menu dropdown-menu ${NS}-menu`;
+    M_menuUL.setAttribute('role', 'menu');
 
-    rootLI.append(toggleEl, menuUL);
+    M_rootLI.append(M_toggleEl, M_menuUL);
 
     const navUL =
-      $('ul.primary.navigation.actions') ||
-      $('#header .primary.navigation ul') ||
-      $('#header .navigation ul');
+      M_$('ul.primary.navigation.actions') ||
+      M_$('#header .primary.navigation ul') ||
+      M_$('#header .navigation ul');
+
+    function M_$(sel, root=document){ return root.querySelector(sel); }
+
     if (navUL) {
-      navUL.insertBefore(rootLI, navUL.firstChild);
+      navUL.insertBefore(M_rootLI, navUL.firstChild);
     } else {
       const floater = document.createElement('div');
       floater.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:999999;';
-      floater.appendChild(rootLI);
+      floater.appendChild(M_rootLI);
       (document.body || document.documentElement).appendChild(floater);
     }
 
-    on(rootLI, 'mouseenter', openMenu);
-    on(rootLI, 'mouseleave', closeMenu);
-    on(rootLI, 'focusin', openMenu);
-    on(rootLI, 'focusout', (e)=>{ if(!rootLI.contains(e.relatedTarget)) closeMenu(); });
-    on(toggleEl, 'click', (e)=>{ e.preventDefault(); rootLI.classList.contains('open') ? closeMenu() : openMenu(); });
-    on(document, 'click', (e)=>{ if (!rootLI.contains(e.target)) closeMenu(); });
-    on(document, 'keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
+    M_on(M_rootLI, 'mouseenter', openMenu);
+    M_on(M_rootLI, 'mouseleave', closeMenu);
+    M_on(M_rootLI, 'focusin', openMenu);
+    M_on(M_rootLI, 'focusout', (e)=>{ if(!M_rootLI.contains(e.relatedTarget)) closeMenu(); });
+    M_on(M_toggleEl, 'click', (e)=>{ e.preventDefault(); M_rootLI.classList.contains('open') ? closeMenu() : openMenu(); });
+    M_on(document, 'click', (e)=>{ if (!M_rootLI.contains(e.target)) closeMenu(); });
+    M_on(document, 'keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
-    on(menuUL, 'keydown', (e)=>{
-      const items = Array.from(menuUL.querySelectorAll('a'));
+    M_on(M_menuUL, 'keydown', (e)=>{
+      const items = Array.from(M_menuUL.querySelectorAll('a'));
       const i = items.indexOf(document.activeElement);
       if (e.key === 'ArrowDown'){ e.preventDefault(); (items[i+1]||items[0])?.focus(); }
       if (e.key === 'ArrowUp'){ e.preventDefault(); (items[i-1]||items[items.length-1])?.focus(); }
@@ -240,12 +244,12 @@
       if (e.key === 'End'){ e.preventDefault(); items[items.length-1]?.focus(); }
     });
 
-    on(menuUL, 'click', async (e)=>{
+    M_on(M_menuUL, 'click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
       const key = a.dataset.flag;
-      const next = !Flags.get(key, false);
-      await Flags.set(key, next);
+      const next = !M_FLAGS.get(key, false);
+      await M_FLAGS.set(key, next);
       a.querySelector(`.${NS}-state`).textContent = next ? '✓' : '';
       a.setAttribute('aria-checked', String(next));
     });
@@ -253,20 +257,22 @@
     fillMenu();
   }
 
-  // API publique (pour ajouter des éléments depuis d'autres scripts)
-  function addToggle(flagKey, label, defaultOn=false){ customItems.push({ type:'toggle', flagKey, label, defaultOn }); if (menuUL) fillMenu(); }
-  function addAction(label, handler, hint=''){ customItems.push({ type:'action', label, handler, hint }); if (menuUL) fillMenu(); }
-  function addSeparator(){ customItems.push({ type:'sep' }); if (menuUL) fillMenu(); }
-  function rebuild(){ if (menuUL) fillMenu(); }
+  // API publique — noms uniques
+  function addToggle(flagKey, label, defaultOn=false){ M_customItems.push({ type:'toggle', flagKey, label, defaultOn }); if (M_menuUL) fillMenu(); }
+  function addAction(label, handler, hint=''){ M_customItems.push({ type:'action', label, handler, hint }); if (M_menuUL) fillMenu(); }
+  function addSeparator(){ M_customItems.push({ type:'sep' }); if (M_menuUL) fillMenu(); }
+  function rebuild(){ if (M_menuUL) fillMenu(); }
   AO3H.menu = { addToggle, addAction, addSeparator, rebuild };
 
-  onReady(()=>{
+  M_onReady(()=>{
     try {
       buildMenu();
-      GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
-        const tab = document.querySelector(`li.${NS}-root`);
-        tab?.dispatchEvent(new Event('mouseenter'));
-      });
+      try {
+        GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
+          const tab = document.querySelector(`li.${NS}-root`);
+          tab?.dispatchEvent(new Event('mouseenter'));
+        });
+      } catch {}
     } catch (err) {
       console.error('[AO3H][menu] build failed', err);
     }
