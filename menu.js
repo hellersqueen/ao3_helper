@@ -1,3 +1,14 @@
+// ==UserScript==
+// @name         AO3 Helper - Menu (Header Dropdown Skin)
+// @namespace    ao3h
+// @version      1.1.1
+// @description  Onglet AO3 Helper dans l’entête (dropdown), toggles auto des modules, Import/Export.
+// @match        https://archiveofourown.org/*
+// @grant        GM_registerMenuCommand
+// @grant        GM_addStyle
+// @run-at       document-end
+// ==/UserScript==
+
 ;(function () {
   'use strict';
 
@@ -143,16 +154,16 @@
       menu.appendChild(itemAction('No modules registered', '', ()=>{}));
     }
 
-    // --- Séparateur (optionnel) ---
+    // --- Séparateur ---
     {
       const sep = document.createElement('li');
       sep.className = 'divider';
       menu.appendChild(sep);
     }
 
-    // --- Import/Export hidden works (ouvre le dialog lazy) ---
+    // --- Import/Export hidden works ---
     menu.appendChild(itemAction('Hidden works…', 'Import / Export', openIE));
-    
+
     li.append(toggle, menu);
 
     // Ouverture/fermeture
@@ -168,7 +179,7 @@
     on(document, 'click', (e)=>{ if (!li.contains(e.target)) closeMenu(); });
     on(document, 'keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
-    // Click sur un toggle → flip flag + reflet visuel
+    // Click sur un toggle → flip flag
     on(menu, 'click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
@@ -179,7 +190,7 @@
       a.setAttribute('aria-checked', String(next));
     });
 
-    // Attacher à la barre d’AO3, sinon fallback coin bas-droit
+    // Attacher à la barre d’AO3, sinon fallback bas-droite
     const navUL =
       $('ul.primary.navigation.actions') ||
       $('#header .primary.navigation ul') ||
@@ -198,13 +209,10 @@
   onReady(()=>{
     try {
       buildMenu();
-      // (optionnel) commandes Tampermonkey
-      try {
-        GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
-          const tab = document.querySelector(`li.${NS}-root`);
-          tab?.dispatchEvent(new Event('mouseenter'));
-        });
-      } catch {}
+      GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
+        const tab = document.querySelector(`li.${NS}-root`);
+        tab?.dispatchEvent(new Event('mouseenter'));
+      });
       log?.info?.('[menu] ready');
     } catch (err) {
       console.error('[AO3H][menu] build failed', err);
