@@ -1,29 +1,13 @@
-// ==UserScript==
-// @name         AO3 Helper - Menu (Header Dropdown, Minimal + Extensible)
-// @namespace    ao3h
-// @version      1.2.0
-// @description  Onglet AO3 Helper dans l’entête: toggles auto des modules + API pour ajouter des actions.
-// @match        https://archiveofourown.org/*
-// @grant        GM_addStyle
-// @grant        GM_registerMenuCommand
-// @run-at       document-end
-// ==/UserScript==
-
 ;(function () {
   'use strict';
 
   const AO3H = window.AO3H || {};
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
 
-  // Utilitaires requis (fallbacks si core est très minimal)
   const $   = (AO3H.util && AO3H.util.$)   || ((s,r=document)=>r.querySelector(s));
   const on  = (AO3H.util && AO3H.util.on)  || ((el,e,cb,o)=>el&&el.addEventListener(e,cb,o));
-  const css = (AO3H.util && AO3H.util.css) || ((txt)=>{
-    const el=document.createElement('style'); el.textContent=txt; (document.head||document.documentElement).appendChild(el);
-  });
-  const onReady = (AO3H.util && AO3H.util.onReady) || (fn => (document.readyState==='loading')
-    ? document.addEventListener('DOMContentLoaded', fn, {once:true})
-    : fn());
+  const css = (AO3H.util && AO3H.util.css) || ((txt)=>{ const el=document.createElement('style'); el.textContent=txt; (document.head||document.documentElement).appendChild(el); });
+  const onReady = (AO3H.util && AO3H.util.onReady) || (fn => (document.readyState==='loading') ? document.addEventListener('DOMContentLoaded', fn, {once:true}) : fn());
   const Flags   = AO3H.flags;
   const Modules = AO3H.modules;
 
@@ -35,32 +19,22 @@
     --${NS}-pad-x: .8em;
     --${NS}-ring: 2px solid rgba(255,255,255,.6);
   }
-
-  /* Lien d’onglet façon AO3 (non cliquable, hover géré par <li>.dropdown) */
   .${NS}-navlink{
     color:#fff; text-decoration:none; padding:var(--${NS}-pad-y) var(--${NS}-pad-x);
-    display:inline-block; transition:background-color .2s; cursor:default; pointer-events:none;
-    outline: 0;
+    display:inline-block; transition:background-color .2s; cursor:default; pointer-events:none; outline:0;
   }
   .${NS}-root:hover .${NS}-navlink,
   .${NS}-root:focus-within .${NS}-navlink,
   .${NS}-root.open .${NS}-navlink{ background-color: rgba(255,255,255,0.15); text-decoration:none; }
 
-  /* Dropdown */
   .${NS}-menu{ min-width:260px; }
-  .${NS}-menu a{
-    display:flex; align-items:center; justify-content:space-between; gap:var(--${NS}-gap);
-    padding:.35rem .75rem;
-  }
+  .${NS}-menu a{ display:flex; align-items:center; justify-content:space-between; gap:var(--${NS}-gap); padding:.35rem .75rem; }
   .${NS}-menu a:focus{ outline: var(--${NS}-ring); outline-offset: -2px; }
   .${NS}-label{ flex:1; }
   .${NS}-state{ width:1.2em; text-align:center; }
   .${NS}-kbd{ font-size:12px; color:#666; margin-left:.75rem; }
-
-  /* Séparateur */
   .${NS}-divider{ border-top:1px solid #ddd; margin:.35rem .25rem; }
 
-  /* Dialog Import/Export (ajouté seulement si fonctions globales définies) */
   #${NS}-ie-dialog::backdrop { background: rgba(0,0,0,.35); }
   #${NS}-ie-dialog{
     border:1px solid #bfc7cf; border-radius:10px; padding:16px 16px 14px;
@@ -69,19 +43,15 @@
   #${NS}-ie-title{ font-weight:700; margin:0 0 10px; font-size:16px; }
   #${NS}-ie-desc { margin:0 0 14px; font-size:13px; color:#444; }
   #${NS}-ie-row{ display:flex; gap:10px; margin-top:8px; }
-  #${NS}-ie-row button{
-    flex:1; padding:10px 12px; border-radius:8px; border:1px solid #bfc7cf; background:#e7edf3; cursor:pointer; font-size:13px;
-  }
+  #${NS}-ie-row button{ flex:1; padding:10px 12px; border-radius:8px; border:1px solid #bfc7cf; background:#e7edf3; cursor:pointer; font-size:13px; }
   #${NS}-ie-row button:hover{ filter:brightness(.98); }
   #${NS}-ie-foot{ display:flex; justify-content:flex-end; margin-top:10px; }
-  #${NS}-ie-cancel{
-    padding:6px 10px; border-radius:8px; border:1px solid #ccc; background:#f7f7f7; cursor:pointer; font-size:12px;
-  }
+  #${NS}-ie-cancel{ padding:6px 10px; border-radius:8px; border:1px solid #ccc; background:#f7f7f7; cursor:pointer; font-size:12px; }
   `);
 
   /* ===================== IMPORT/EXPORT (optionnel) ===================== */
   function ensureIE() {
-    if (!window.ao3hExportHiddenWorks && !window.ao3hImportHiddenWorks) return false; // rien à afficher
+    if (!window.ao3hExportHiddenWorks && !window.ao3hImportHiddenWorks) return false;
     if (document.getElementById(`${NS}-ie-dialog`)) return true;
 
     const dlg = document.createElement('dialog');
@@ -153,7 +123,7 @@
   function fillMenu(){
     menuUL.innerHTML = '';
 
-    // 1) Toggles dynamiques pour les modules enregistrés
+    // 1) Toggles auto pour les modules
     const mods = (Modules && Modules.all ? Modules.all() : []);
     if (mods.length){
       for (const { name, meta, enabledKey } of mods){
@@ -167,7 +137,7 @@
     // 2) Séparateur
     menuUL.appendChild(itemDivider());
 
-    // 3) Éléments personnalisés ajoutés par d’autres scripts
+    // 3) Items custom ajoutés par d’autres scripts
     for (const it of customItems){
       if (it.type === 'sep') { menuUL.appendChild(itemDivider()); continue; }
       if (it.type === 'toggle'){
@@ -181,11 +151,9 @@
       }
     }
 
-    // 4) Import/Export (uniquement si fonctions présentes)
+    // 4) Import/Export (si fonctions présentes)
     if (window.ao3hExportHiddenWorks || window.ao3hImportHiddenWorks) {
-      if (menuUL.lastElementChild?.className !== `${NS}-divider`) {
-        menuUL.appendChild(itemDivider());
-      }
+      if (menuUL.lastElementChild?.className !== `${NS}-divider`) menuUL.appendChild(itemDivider());
       menuUL.appendChild(itemAction('Hidden works…', 'Import / Export', openIE));
     }
   }
@@ -212,7 +180,6 @@
 
     rootLI.append(toggleEl, menuUL);
 
-    // Attach dans la barre AO3, sinon fallback coin bas-droit
     const navUL =
       $('ul.primary.navigation.actions') ||
       $('#header .primary.navigation ul') ||
@@ -226,7 +193,6 @@
       (document.body || document.documentElement).appendChild(floater);
     }
 
-    // Ouverture/fermeture souris + clavier
     on(rootLI, 'mouseenter', openMenu);
     on(rootLI, 'mouseleave', closeMenu);
     on(rootLI, 'focusin', openMenu);
@@ -235,7 +201,6 @@
     on(document, 'click', (e)=>{ if (!rootLI.contains(e.target)) closeMenu(); });
     on(document, 'keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
 
-    // Navigation clavier dans la liste
     on(menuUL, 'keydown', (e)=>{
       const items = Array.from(menuUL.querySelectorAll('a'));
       const i = items.indexOf(document.activeElement);
@@ -245,7 +210,6 @@
       if (e.key === 'End'){ e.preventDefault(); items[items.length-1]?.focus(); }
     });
 
-    // Click sur un toggle → flip flag + reflet visuel
     on(menuUL, 'click', async (e)=>{
       const a = e.target.closest('a'); if (!a || !a.dataset.flag) return;
       e.preventDefault();
@@ -259,28 +223,17 @@
     fillMenu();
   }
 
-  /* ========================== API PUBLIQUE MENU ========================== */
-  function addToggle(flagKey, label, defaultOn=false){
-    customItems.push({ type:'toggle', flagKey, label, defaultOn });
-    if (menuUL) fillMenu();
-  }
-  function addAction(label, handler, hint=''){
-    customItems.push({ type:'action', label, handler, hint });
-    if (menuUL) fillMenu();
-  }
-  function addSeparator(){
-    customItems.push({ type:'sep' });
-    if (menuUL) fillMenu();
-  }
+  // API publique pour modules/autres scripts
+  function addToggle(flagKey, label, defaultOn=false){ customItems.push({ type:'toggle', flagKey, label, defaultOn }); if (menuUL) fillMenu(); }
+  function addAction(label, handler, hint=''){ customItems.push({ type:'action', label, handler, hint }); if (menuUL) fillMenu(); }
+  function addSeparator(){ customItems.push({ type:'sep' }); if (menuUL) fillMenu(); }
   function rebuild(){ if (menuUL) fillMenu(); }
 
   AO3H.menu = { addToggle, addAction, addSeparator, rebuild };
 
-  /* ================================ BOOT ================================ */
   onReady(()=>{
     try {
       buildMenu();
-      // Commande Tampermonkey facultative
       try {
         GM_registerMenuCommand?.('AO3 Helper — Open', ()=> {
           const tab = document.querySelector(`li.${NS}-root`);
