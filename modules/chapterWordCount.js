@@ -30,15 +30,23 @@
     return tokens ? tokens.length : 0;
   }
 
-  function wordsForChapter(ch){
-    // Prend TOUTES les .userstuff du chapitre,
-    // exclut seulement les zones clairement “notes”
-    const all = Array.from(ch.querySelectorAll('.userstuff'));
-    const main = all.filter(el => !el.closest('.preface') && !el.closest('.endnotes'));
-    const used = main.length ? main : all;
-    const text = used.map(el => el.textContent || el.innerText || '').join('\n');
-    return countWordsFromText(text);
-  }
+function wordsForChapter(ch){
+  // 1) EXACTEMENT comme l'ancien : userstuff hors preface/summary/endnotes
+  const all = Array.from(ch.querySelectorAll('.userstuff'));
+  const main = all.filter(usd => !usd.closest('.preface, .summary, .endnotes'));
+  const used = main.length ? main : all;
+
+  // 2) EXACTEMENT comme l'ancien : innerText (pas textContent)
+  const text = used.map(n => n.innerText || '').join('\n');
+
+  // 3) EXACTEMENT comme l'ancien : regex Unicode, avec fallback
+  let m = null;
+  try { m = text.match(/[\p{L}\p{N}’'-]+/gu); } catch {}
+  if (!m) m = text.match(/\S+/g);
+
+  return m ? m.length : 0;
+}
+
 
   function ensureStyles(){
     css(`.${NS}-wc-badge{ margin:.5rem 0; font-size:.95rem; opacity:.85; }`, 'chapter-wc-style');
