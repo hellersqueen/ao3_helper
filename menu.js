@@ -1,14 +1,3 @@
-// ==UserScript==
-// @name         AO3 Helper - Menu (Header Dropdown, Anticollision)
-// @namespace    ao3h
-// @version      1.2.3
-// @description  Onglet AO3 Helper dans l’entête: toggles auto + API, aucun alias global ambigu.
-// @match        https://archiveofourown.org/*
-// @grant        GM_addStyle
-// @grant        GM_registerMenuCommand
-// @run-at       document-end
-// ==/UserScript==
-
 ;(function () {
   'use strict';
 
@@ -215,8 +204,6 @@
       M_$('ul.primary.navigation.actions') ||
       M_$('#header .primary.navigation ul') ||
       M_$('#header .navigation ul');
-
-    function M_$(sel, root=document){ return root.querySelector(sel); }
 
     if (navUL) {
       navUL.insertBefore(M_rootLI, navUL.firstChild);
