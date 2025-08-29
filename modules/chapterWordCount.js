@@ -1,4 +1,4 @@
-/* modules/chapterWordCount.js — per-chapter word counts (robuste) */
+/* modules/chapterWordCount.js — per-chapter word counts (ultra-robuste) */
 ;(function(){
   'use strict';
 
@@ -16,31 +16,38 @@
   let mo = null; // MutationObserver
 
   /* ---------------- helpers ---------------- */
-  function collectMainUserstuffNodes(scopeEl){
-    // Prend toutes les .userstuff mais exclut celles dans notes/summary/preface/endnotes
-    const all = Array.from(scopeEl.querySelectorAll('.userstuff'));
-    return all.filter(usd => !usd.closest('.preface, .summary, .endnotes, .notes'));
-  }
-
   function countWordsFromText(text){
     if (!text) return 0;
     const s = text.replace(/\s+/g, ' ').trim();
     if (!s) return 0;
-
-    // Regex “jolie” (Unicode) + fallback simple si non supporté
     let tokens = null;
-    try {
-      tokens = s.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu);
-    } catch { /* moteurs sans Unicode property escapes */ }
+    try { tokens = s.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu); } catch {}
     if (!tokens) tokens = s.match(/\S+/g);
-
     return tokens ? tokens.length : 0;
   }
 
-  function wordsForScope(scopeEl){
-    const nodes = collectMainUserstuffNodes(scopeEl);
-    const text  = nodes.map(n => n.textContent || n.innerText || '').join('\n');
-    return countWordsFromText(text);
+  function pickMainUserstuff(ch){
+    // 1) Candidats : toutes les .userstuff sous ce chapitre
+    const all = Array.from(ch.querySelectorAll('.userstuff'));
+    if (!all.length) return null;
+
+    // 2) Filtrer celles dans notes/summary/preface/endnotes si possible
+    const filtered = all.filter(usd => !usd.closest('.preface, .summary, .endnotes, .notes'));
+
+    // 3) Choisir la plus longue (contenu principal)
+    const candidates = filtered.length ? filtered : all;
+    let best = null, max = -1;
+    for (const el of candidates){
+      const len = (el.textContent || el.innerText || '').trim().length;
+      if (len > max){ best = el; max = len; }
+    }
+    return best;
+  }
+
+  function wordsForChapter(ch){
+    const main = pickMainUserstuff(ch);
+    if (!main) return 0;
+    return countWordsFromText(main.textContent || main.innerText || '');
   }
 
   function ensureStyles(){
@@ -68,21 +75,31 @@
 
     if (chapters.length){
       for (const ch of chapters){
-        const words  = wordsForScope(ch);
+        const words  = wordsForChapter(ch);
         const header = ch.querySelector('h3.title, h2.heading, h3.heading, h2, h3') || ch;
         insertBadge(header, words);
       }
       return;
     }
 
-    // 2) Fallback: page simple sans .chapter
+    // 2) Page simple sans .chapter : prendre la plus longue .userstuff globale
     const workskin = document.querySelector('#workskin');
     if (workskin){
-      const words = wordsForScope(workskin);
-      const anchor =
-        workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading') ||
-        workskin.querySelector('.preface') || workskin;
-      insertBadge(anchor, words);
+      const all = Array.from(workskin.querySelectorAll('.userstuff'));
+      let best = null, max = -1;
+      for (const el of all){
+        if (el.closest('.preface, .summary, .endnotes, .notes')) continue;
+        const len = (el.textContent || '').trim().length;
+        if (len > max){ best = el; max = len; }
+      }
+      const main = best || all.sort((a,b)=>(b.textContent||'').length-(a.textContent||'').length)[0];
+      if (main){
+        const words = countWordsFromText(main.textContent || '');
+        const anchor =
+          workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading') ||
+          workskin.querySelector('.preface') || workskin;
+        insertBadge(anchor, words);
+      }
     }
   }
 
