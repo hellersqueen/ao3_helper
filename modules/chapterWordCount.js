@@ -1,4 +1,4 @@
-/* modules/chapterWordCount.js — word counts (SAFE: no observer loop) */
+/* modules/chapterWordCount.js — per-chapter word counts (safe & robust) */
 ;(function(){
   'use strict';
 
@@ -13,9 +13,11 @@
   const ENABLE_KEY = `mod:${MOD}:enabled`;
 
   let enabled = false;
+
+  // Passes temporisées (0 boucle)
   let tries = 0;
-  const MAX_TRIES = 3;   // nombre de passes au max
-  const DELAY_MS  = 800; // délai entre passes (laisse AO3 finir ses updates)
+  const MAX_TRIES = 3;
+  const DELAY_MS  = 700;
 
   /* ---------- helpers ---------- */
   function countWordsFromText(text){
@@ -28,23 +30,14 @@
     return tokens ? tokens.length : 0;
   }
 
-  function pickMainUserstuff(ch){
-    const all = Array.from(ch.querySelectorAll('.userstuff'));
-    if (!all.length) return null;
-    const filtered = all.filter(usd => !usd.closest('.preface, .summary, .endnotes, .notes'));
-    const candidates = filtered.length ? filtered : all;
-    let best=null, max=-1;
-    for (const el of candidates){
-      const len = (el.textContent || el.innerText || '').trim().length;
-      if (len > max){ best = el; max = len; }
-    }
-    return best;
-  }
-
   function wordsForChapter(ch){
-    const main = pickMainUserstuff(ch);
-    if (!main) return 0;
-    return countWordsFromText(main.textContent || main.innerText || '');
+    // Prend TOUTES les .userstuff du chapitre,
+    // exclut seulement les zones clairement “notes”
+    const all = Array.from(ch.querySelectorAll('.userstuff'));
+    const main = all.filter(el => !el.closest('.preface') && !el.closest('.endnotes'));
+    const used = main.length ? main : all;
+    const text = used.map(el => el.textContent || el.innerText || '').join('\n');
+    return countWordsFromText(text);
   }
 
   function ensureStyles(){
@@ -92,47 +85,31 @@
       return;
     }
 
-    // 2) Page simple sans .chapter : plus grande .userstuff
+    // 2) Page simple (une seule section)
     const workskin = document.getElementById('workskin') || document.querySelector('#workskin');
     if (workskin){
-      const all = Array.from(workskin.querySelectorAll('.userstuff'));
-      let best = null, max = -1;
-      for (const el of all){
-        if (el.closest('.preface, .summary, .endnotes, .notes')) continue;
-        const len = (el.textContent || '').trim().length;
-        if (len > max){ best = el; max = len; }
-      }
-      const main = best || all.sort((a,b)=>(b.textContent||'').length-(a.textContent||'').length)[0];
-      if (main){
-        const words = countWordsFromText(main.textContent || '');
-        const anchor =
-          workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading') ||
-          workskin.querySelector('.preface') || workskin;
-        insertOrUpdateBadge(anchor, words);
-      }
+      const text = Array.from(workskin.querySelectorAll('.userstuff'))
+        .filter(el => !el.closest('.preface') && !el.closest('.endnotes'))
+        .map(el => el.textContent || '')
+        .join('\n');
+      const words = countWordsFromText(text);
+      const anchor =
+        workskin.querySelector('h2.title, h2.heading, h3.title, h3.heading') ||
+        workskin.querySelector('.preface') || workskin;
+      insertOrUpdateBadge(anchor, words);
     }
   }
 
   function scheduleRuns(){
-    // 1ère passe dès que possible (idle si dispo), puis 2 reprises espacées
     tries = 0;
-    const once = () => { tries++; guard(runOnce, `${MOD}:run:${tries}`); };
-    const again = () => { if (!enabled) return; if (tries >= MAX_TRIES) return; setTimeout(()=>{ once(); again(); }, DELAY_MS); };
-
-    if ('requestIdleCallback' in window) {
-      requestIdleCallback(()=>{ once(); again(); }, { timeout: 1500 });
-    } else {
-      setTimeout(()=>{ once(); again(); }, 0);
-    }
+    const once  = () => { tries++; guard(runOnce, `${MOD}:run:${tries}`); };
+    const again = () => { if (!enabled || tries >= MAX_TRIES) return; setTimeout(()=>{ once(); again(); }, DELAY_MS); };
+    if ('requestIdleCallback' in window) requestIdleCallback(()=>{ once(); again(); }, { timeout: 1500 });
+    else setTimeout(()=>{ once(); again(); }, 0);
   }
 
-  function start(){
-    scheduleRuns(); // pas d'observer continu → pas de boucle
-    log.info?.(`[${MOD}] started (safe mode)`);
-  }
-
+  function start(){ scheduleRuns(); log.info?.(`[${MOD}] started (safe)`); }
   function stop(){
-    // nettoie simplement les badges
     document.querySelectorAll(`[data-ao3h-mod="${MOD}"], .${NS}-wc-badge`).forEach(el => el.remove());
     log.info?.(`[${MOD}] stopped`);
   }
