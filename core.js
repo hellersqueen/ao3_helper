@@ -1,10 +1,11 @@
 ;(function(){
   'use strict';
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
   /* ========================= ENV / NAMESPACE / LOG ========================= */
   const NS      = 'ao3h';
-  const VERSION = '1.1.0';
-  const DEBUG   = false;               // true pour debug global
+  const VERSION = '1.2.3';
+  const DEBUG   = false;               // true for global debug
   const LOG_LVL = 1;                   // 0: silent, 1: info, 2: debug
 
   const log = {
@@ -27,21 +28,44 @@
   const debounce = (fn,ms=200)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
   const throttle = (fn,ms=200)=>{ let t=0; return (...a)=>{ const n=Date.now(); if(n-t>=ms){ t=n; fn(...a); } }; };
 
-  function observe(root, opts, cb){
-    const ob = new MutationObserver(cb);
-    ob.observe(root || document.documentElement, opts || {childList:true,subtree:true});
-    return ob;
+  function observe(rootOrCb, optsOrCb, maybeCb){
+    let root = document.documentElement;
+    let opts = { childList: true, subtree: true };
+    let cb;
+
+    if (typeof rootOrCb === 'function') {
+      cb = rootOrCb;
+    } else {
+      if (rootOrCb) root = rootOrCb;
+      if (typeof optsOrCb === 'function') cb = optsOrCb;
+      else { if (optsOrCb) opts = optsOrCb; cb = maybeCb; }
+    }
+
+    if (typeof cb !== 'function') { console.warn('[AO3H] observe(): missing callback'); cb = ()=>{}; }
+    const mo = new MutationObserver(cb);
+    mo.observe(root, opts);
+    return mo;
   }
 
-  // CSS helper (clé = pour éviter doublons si ré-injecté)
+  // CSS helper (idempotent)
   const _cssKeys = new Set();
-  function css(str, key=`block-${_cssKeys.size}`){
+  function css(first, ...rest){
+    let text = '';
+    let key  = `block-${_cssKeys.size}`;
+    if (Array.isArray(first) && Object.prototype.hasOwnProperty.call(first, 'raw')) {
+      const strings = first, vals = rest;
+      text = strings.map((s,i)=> s + (i < vals.length ? vals[i] : '')).join('');
+    } else {
+      text = String(first ?? '');
+      if (typeof rest[0] === 'string') key = rest[0];
+    }
     if (_cssKeys.has(key)) return;
     _cssKeys.add(key);
-    try { GM_addStyle(str); } catch {
+    try { GM_addStyle(text); }
+    catch {
       const style = document.createElement('style');
-      style.textContent = str;
-      document.documentElement.appendChild(style);
+      style.textContent = text;
+      (document.head || document.documentElement).appendChild(style);
     }
   }
 
@@ -51,7 +75,6 @@
     async get(k, d=null){ try { return await GM_getValue(this.key(k), d); } catch { return d; } },
     async set(k, v){ try { GM_setValue(this.key(k), v); } catch(e){ log.err('GM_setValue failed', e); } return v; },
     async del(k){ try { GM_deleteValue(this.key(k)); } catch(e){ log.err('GM_deleteValue failed', e); } },
-    // miroirs LS (optionnels)
     lsGet(k, d=null){ try { const v = localStorage.getItem(this.key(k)); return v==null?d:JSON.parse(v); } catch { return d; } },
     lsSet(k, v){ try { localStorage.setItem(this.key(k), JSON.stringify(v)); } catch(e){ log.err('ls set failed', e); } return v; },
     lsDel(k){ try { localStorage.removeItem(this.key(k)); } catch(e){ log.err('ls del failed', e); } },
@@ -71,7 +94,7 @@
 
   /* ============================== EVENT BUS ================================ */
   const Bus = (()=> {
-    const map = new Map(); // evt => Set<fn>
+    const map = new Map();
     function on(evt, fn){ if(!map.has(evt)) map.set(evt, new Set()); map.get(evt).add(fn); }
     function off(evt, fn){ const set = map.get(evt); if(set) set.delete(fn); }
     function emit(evt, data){ const set = map.get(evt); if(set) for(const fn of set) { try{ fn(data);}catch(e){ log.err('Bus handler', e); } } }
@@ -104,14 +127,22 @@
     }
     function getAll(){ return cache || _ensureLoaded() || {}; }
     function get(key, d=null){ const all = getAll(); return (key in all)? all[key] : d; }
+
+    // Change-detection to prevent feedback loops or redundant watcher fires
     async function set(key, val){
-      const all = getAll(); all[key] = val;
+      const all  = getAll();
+      const prev = all[key];
+      if (prev === val) return val; // no-op
+
+      all[key] = val;
       await Storage.set(DEF_KEY, all);
       Storage.lsSet(DEF_KEY, all);
+
       const set = watchers.get(key);
       if (set) for (const fn of set) try{ fn(val); }catch(e){ log.err('flag watcher', e); }
       return val;
     }
+
     function watch(key, fn){
       if(!watchers.has(key)) watchers.set(key, new Set());
       watchers.get(key).add(fn);
@@ -121,26 +152,116 @@
   })();
 
   /* =========================== MODULE REGISTRY ============================ */
-  const Modules = (()=> {
-    const list = new Map(); // name => { meta, init, enabledKey }
-    function register(name, meta, init){
-      if (list.has(name)) { log.warn('Module already registered', name); return; }
-      const enabledKey = `mod:${name}:enabled`;
-      list.set(name, { meta: meta||{}, init, enabledKey });
+  function slugify(name){
+    return String(name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  const Modules = (()=>{
+    // name => { meta, init, enabledKey, enabledKeyAlt, _booted, _dispose }
+    const list = new Map();
+
+    function _disposer(ret){
+      if (typeof ret === 'function') return ret;
+      if (ret && typeof ret.dispose === 'function') return ()=>ret.dispose();
+      return null;
     }
-    function all(){ return Array.from(list.entries()).map(([name, m])=>({name, ...m})); }
+
+    function _keyPair(name){
+      const canonical = `mod:${name}:enabled`;
+      const alt = `mod:${slugify(name)}:enabled`;
+      return { canonical, alt };
+    }
+
+    function _effectiveOn(m){
+      return !!Flags.get(m.enabledKey, !!m.meta?.enabledByDefault)
+          || !!Flags.get(m.enabledKeyAlt, false);
+    }
+
+    async function bootOne(name){
+      const m = list.get(name);
+      if (!m || m._booted) return false;
+      return await guard(async ()=>{
+        log.info(`Boot ${name}`);
+        const ret = await m.init?.();
+        m._dispose = _disposer(ret);
+        m._booted  = true;
+        Bus.emit('module:started', { name });
+        return true;
+      }, `init:${name}`);
+    }
+
+    async function stopOne(name){
+      const m = list.get(name);
+      if (!m || !m._booted) return false;
+      return await guard(async ()=>{
+        log.info(`Stop ${name}`);
+        try { m._dispose?.(); } catch(e){ log.err('dispose failed', e); }
+        m._dispose = null;
+        m._booted  = false;
+        Bus.emit('module:stopped', { name });
+        return true;
+      }, `stop:${name}`);
+    }
+
+    async function _refresh(name){
+      const m = list.get(name); if (!m) return;
+      const want = _effectiveOn(m);
+      if (want && !m._booted) await bootOne(name);
+      else if (!want && m._booted) await stopOne(name);
+    }
+
+    function register(name, meta, init){
+      const { canonical, alt } = _keyPair(name);
+      const prev = list.get(name);
+      const base = {
+        meta: meta || prev?.meta || {},
+        init: init || prev?.init,
+        enabledKey: canonical,
+        enabledKeyAlt: alt,
+        _booted: false,
+        _dispose: null,
+      };
+      list.set(name, base);
+
+      // Watch both keys — ONLY start/stop, never write flags here.
+      Flags.watch(canonical, ()=>{ _refresh(name); });
+      if (alt !== canonical) Flags.watch(alt, ()=>{ _refresh(name); });
+    }
+
     async function bootAll(){
-      for (const [name, m] of list){
-        const shouldOn = !!Flags.get(m.enabledKey, !!m.meta?.enabledByDefault);
-        if (!shouldOn) { log.dbg(`Skip ${name} (disabled)`); continue; }
-        await guard(async ()=>{
-          log.info(`Boot ${name}`);
-          await m.init?.();
-          Bus.emit('module:started', { name });
-        }, `init:${name}`);
+      // Start whatever is enabled at boot time
+      for (const [name, m] of list) {
+        if (_effectiveOn(m)) await bootOne(name);
       }
     }
-    return { register, all, bootAll };
+    async function stopAll(){ for (const [name] of list) await stopOne(name); }
+
+    // Public: the single place that mirrors both keys
+    async function setEnabled(name, val){
+      const m = list.get(name); if (!m) return;
+      await Flags.set(m.enabledKey, !!val);
+      if (m.enabledKeyAlt !== m.enabledKey) await Flags.set(m.enabledKeyAlt, !!val);
+      // Watchers will call _refresh; no need to call it again.
+    }
+
+    // Helper for UIs that only know a key
+    async function onFlagChanged(key, val){
+      for (const [name, m] of list){
+        if (m.enabledKey === key || m.enabledKeyAlt === key) {
+          await setEnabled(name, !!val);
+          break;
+        }
+      }
+    }
+
+    function all(){
+      return Array.from(list.entries()).map(([name, m])=>({ name, ...m }));
+    }
+
+    return { register, all, bootAll, stopAll, setEnabled, onFlagChanged, _bootOne: bootOne, _stopOne: stopOne, _list: list };
   })();
 
   /* ============================== STYLES BASE ============================= */
@@ -150,7 +271,7 @@
   `, 'base-colors');
 
   /* =============================== EXPORTS ================================ */
-  window.AO3H = {
+  const AO3H_API = {
     env: { NS, VERSION, DEBUG },
     util: { $, $$, on, once, onReady, observe, debounce, throttle, sleep, css, log, guard },
     store: Storage,
@@ -158,23 +279,73 @@
     bus: Bus,
     flags: Flags,
     modules: Modules,
-    // API de menu complétée par menu.js
+    // Filled by menu.js later
     menu: { addToggle:()=>{}, addAction:()=>{}, addSeparator:()=>{}, rebuild:()=>{} },
   };
 
+  // Merge if AO3H existed already (avoid clobbering previous props)
+  W.AO3H = W.AO3H ? Object.assign(W.AO3H, AO3H_API) : AO3H_API;
+  try { window.AO3H = W.AO3H; } catch {}
+
+  /* ===== Legacy register() shim ===== */
+  if (!W.AO3H.register) {
+    W.AO3H.register = function(defOrId, maybeDef){
+      const defs = [];
+      if (typeof defOrId === 'string') {
+        defs.push({ id: defOrId, ...(maybeDef || {}) });
+      } else if (defOrId && typeof defOrId === 'object' && !maybeDef) {
+        if (defOrId.id) defs.push(defOrId);
+        else for (const [id, v] of Object.entries(defOrId)) {
+          if (v && typeof v === 'object') defs.push({ id, ...v });
+        }
+      } else { return; }
+
+      for (const def of defs) {
+        const id    = def.id;
+        const title = def.title || id;
+
+        W.AO3H.modules.register(id, { title, enabledByDefault: true }, async function init(){
+          try { def.onFlagsUpdated?.({ enabled: true }); } catch {}
+          let ret = undefined;
+          try { ret = await def.init?.({ enabled: true }); }
+          catch(e){ console.error('[AO3H] legacy init failed', id, e); }
+
+          const disposer = (typeof ret === 'function') ? ret
+                : (ret && typeof ret.dispose === 'function') ? ()=>ret.dispose()
+                : (typeof def.dispose === 'function') ? ()=>def.dispose()
+                : null;
+
+          return () => {
+            try { def.onFlagsUpdated?.({ enabled: false }); } catch {}
+            try { disposer?.(); } catch(e){ console.error('[AO3H] legacy dispose failed', id, e); }
+          };
+        });
+
+        const canonical = `mod:${id}:enabled`;
+        const alt = `mod:${String(id).toLowerCase().replace(/[^a-z0-9]+/g,'')}:enabled`;
+        Flags.watch(canonical, (val)=> { try { def.onFlagsUpdated?.({ enabled: !!val }); } catch {} });
+        if (alt !== canonical) Flags.watch(alt, (val)=> { try { def.onFlagsUpdated?.({ enabled: !!val }); } catch {} });
+      }
+    };
+  }
+
   /* =============================== BOOT =================================== */
   const DEFAULT_FLAGS = {
-    'ui:showMenuButton': false, // pas de bouton flottant dans ce skin
-    // exemples (modules)
+    'ui:showMenuButton': false,
     'mod:SaveScroll:enabled': true,
   };
 
-(async function boot(){
-  await Flags.init(DEFAULT_FLAGS);
-  Bus.emit('core:ready', { version: VERSION });
-  await Modules.bootAll();                 // ← démarre effectivement les modules enregistrés
-  log.info('Core ready', VERSION);
-})();
+  (async function boot(){
+    await Flags.init(DEFAULT_FLAGS);
+    Bus.emit('core:ready', { version: VERSION });
+    await Modules.bootAll();
+    log.info('Core ready', VERSION);
 
+    try {
+      Modules.all().forEach(m=>{
+        log.info('Module registered:', m.name, 'keys:', m.enabledKey, m.enabledKeyAlt);
+      });
+    } catch {}
+  })();
 
 })();
