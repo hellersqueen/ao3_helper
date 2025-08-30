@@ -1,5 +1,5 @@
-/* modules/hideFanficWithNotes.js — hide works with user notes (IndexedDB + minimal note picker)
-   Robust version: observes DOM, supports works/tags/bookmarks listings, lazy-safe globals. */
+/* modules/hideFanficWithNotes.js — hide works with user notes (IndexedDB + note picker)
+   Live-toggle safe, legacy-safe cleanup, CANCELABLE debounce, and TEMP-SHOW allowlist. */
 ;(function(){
   'use strict';
 
@@ -7,23 +7,14 @@
   const AO3H = W.AO3H || {};
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
 
-  const { onReady, observe, debounce, css } = (AO3H.util || {});
-  const dlog = (...a)=>{ if (AO3H.env?.DEBUG) console.log('[AO3H][HideFanficWithNotes]', ...a); };
+  const { onReady, observe, css } = (AO3H.util || {});
 
-  const MOD_ID  = 'HideFanficWithNotes';
+  const MOD_ID   = 'HideFanficWithNotes';
+  const FLAG_CAN = 'mod:HideFanficWithNotes:enabled';
+  const FLAG_ALT = 'mod:hidefanficwithnotes:enabled';
+
   const DB_NAME = 'ao3h-hiddenWorksDB';
   const STORE   = 'works';
-
-  /* ---------------------------- Page detection ---------------------------- */
-  function isListPage(){
-    const p = location.pathname;
-    return (
-      /^\/works\/?$/.test(p) ||
-      /^\/tags\/[^/]+\/works\/?$/.test(p) ||
-      /^\/users\/[^/]+\/bookmarks/.test(p) ||
-      document.querySelector('ol.index li.blurb, #main li.blurb') // fallback check
-    );
-  }
 
   /* ------------------------------- Styles -------------------------------- */
   css`
@@ -70,8 +61,8 @@
 
   /* --------------------------- Quick-note picker -------------------------- */
   const DEFAULT_CHIPS = [
-    'crossover', 'sequel', 'bad summary', 'parent/dad', 'unfinished',
-    'POV 1st', 'established', 'not focused', 'always-a-girl'
+    'crossover','sequel','bad summary','parent/dad','unfinished',
+    'POV 1st','established','not focused','always-a-girl'
   ];
 
   async function pickReason(seed=''){
@@ -82,11 +73,13 @@
       panel.innerHTML = `
         <div><strong>Choose a tag or write a note</strong></div>
         <div class="chips"></div>
-        <div class="row"><input type="text" id="${NS}-pick-inp" placeholder="Write a note…" /><button id="${NS}-pick-add">Add</button></div>
+        <div class="row">
+          <input type="text" id="${NS}-pick-inp" placeholder="Write a note…" />
+          <button id="${NS}-pick-add">Add</button>
+        </div>
         <div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end">
           <button id="${NS}-pick-cancel">Cancel</button>
-        </div>
-      `;
+        </div>`;
       (document.body || document.documentElement).appendChild(panel);
     }
     const chips = panel.querySelector('.chips');
@@ -94,7 +87,7 @@
     DEFAULT_CHIPS.forEach(tag=>{
       const chip = document.createElement('span');
       chip.className='chip'; chip.textContent=tag;
-      chip.addEventListener('click', ()=>finish(tag));
+      chip.addEventListener('click', ()=>finish(tag), { once:true });
       chips.appendChild(chip);
     });
 
@@ -109,19 +102,17 @@
     add.onclick = ()=>{ const v=(inp.value||'').trim(); if (v) finish(v); };
     cancel.onclick = ()=>finish(null);
     panel.classList.add(`${NS}-open`); inp.focus();
-    panel.addEventListener('keydown', (e)=>{ if (e.key==='Enter') add.click(); if (e.key==='Escape') cancel.click(); }, { once:false });
+    panel.addEventListener('keydown', (e)=>{ if (e.key==='Enter') add.click(); if (e.key==='Escape') cancel.click(); });
 
     return p;
   }
 
-  /* ---------------------------- DOM utilities ---------------------------- */
+  /* ----------------------------- Utilities -------------------------------- */
   function queryAllBlurbs(root=document){
-    // AO3 list items are usually <li class="blurb"> inside <ol class="index">.
     const ls = Array.from(root.querySelectorAll('ol.index li.blurb'));
     if (ls.length) return ls;
     return Array.from(root.querySelectorAll('#main li.blurb, li.blurb'));
   }
-
   function ensureHideButton(blurb){
     if (blurb.querySelector('.'+NS+'-hide-btn')) return;
     const header = blurb.querySelector('.header') || blurb.querySelector('.heading') || blurb;
@@ -129,11 +120,14 @@
     btn.className = `${NS}-hide-btn`;
     btn.type = 'button';
     btn.textContent = 'Hide';
+    btn.title = 'Hide (Shift-click to skip note)';
     header.appendChild(btn);
   }
+  function removeHideButtons(){ document.querySelectorAll('.'+NS+'-hide-btn').forEach(b=>b.remove()); }
 
   function getWorkIdFromBlurb(blurb){
-    // Prefer first link in the heading that points to /works/<id>
+    // Null-safe + type guard
+    if (!blurb || typeof blurb.querySelectorAll !== 'function') return null;
     const candidates = blurb.querySelectorAll('.header .heading a, .header a, a[href*="/works/"]');
     for (const a of candidates){
       const href = a.getAttribute('href') || '';
@@ -142,6 +136,7 @@
     return null;
   }
 
+  // Mark children we hide so we can restore later
   function hideWork(blurb, reason){
     if (blurb.querySelector('.'+NS+'-hidebar')) return;
     const bar = document.createElement('div');
@@ -151,59 +146,76 @@
       <div>
         <button class="edit" type="button">Edit</button>
         <button class="show" type="button">Show</button>
-        <button class="unhide" type="button">Unhide</button>
+        <button class="unhide" type="button" title="Unhide permanently (keeps note)">Unhide</button>
       </div>`;
-    bar.querySelector('.reason').textContent = reason;
+    bar.querySelector('.reason').textContent = reason || '';
     blurb.appendChild(bar);
 
-    // temporarily hide the rest of the blurb
-    Array.from(blurb.children).forEach(c=>{ if (c!==bar) c.style.display='none'; });
+    Array.from(blurb.children).forEach(c=>{
+      if (c !== bar) {
+        c.dataset.ao3hHfn = '1';
+        c.style.display = 'none';
+      }
+    });
   }
-
   function showWork(blurb){
     blurb.querySelectorAll('.'+NS+'-hidebar').forEach(x=>x.remove());
-    Array.from(blurb.children).forEach(c=> c.style.removeProperty('display'));
-  }
-
-  /* -------------------------- Export / Import ---------------------------- */
-  async function exportHidden(){
-    await openDB();
-    const all = await getAll();
-    const blob = new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `ao3h-hidden-works-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  }
-  async function importHidden(){
-    const input = document.createElement('input');
-    input.type='file'; input.accept='application/json';
-    input.addEventListener('change', async ()=>{
-      const f = input.files?.[0]; if (!f) return;
-      try{
-        const parsed = JSON.parse(await f.text());
-        if (!Array.isArray(parsed)) throw new Error('Expected JSON array');
-        await openDB();
-        let count = 0;
-        for (const rec of parsed){
-          if (rec && rec.workId) { await put({ workId: rec.workId, reason: String(rec.reason||''), isHidden: rec.isHidden !== false }); count++; }
-        }
-        alert(`Imported ${count} records. Reload to apply on this page.`);
-      }catch(err){
-        alert('Import failed: '+err.message);
+    Array.from(blurb.children).forEach(c=>{
+      if (c.dataset && c.dataset.ao3hHfn === '1') {
+        c.style.removeProperty('display');
+        delete c.dataset.ao3hHfn;
       }
-    }, { once:true });
-    input.click();
+    });
+  }
+  // legacy-safe reveal (clear any inline display:none even without our marker)
+  function forceReveal(blurb){
+    blurb.querySelectorAll('.'+NS+'-hidebar').forEach(b=>b.remove());
+    Array.from(blurb.children).forEach(c=>{
+      if (c.style && c.style.display === 'none') c.style.removeProperty('display');
+      if (c.dataset && c.dataset.ao3hHfn) delete c.dataset.ao3hHfn;
+    });
+  }
+  function unhideAllOnPage(){ document.querySelectorAll('li.blurb, .blurb').forEach(forceReveal); }
+
+  /* ------------------------------ Data cache ------------------------------ */
+  let hiddenCache = new Map();   // workId -> record
+
+  /* ---------------------- TEMP SHOW allowlist (per-path) ------------------ */
+  let tempShow = new Set();
+  const tempKey = ()=> `${NS}:hfn:tempShow:${location.pathname}`;
+  function loadTempShow(){
+    try {
+      const raw = sessionStorage.getItem(tempKey());
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+  }
+  function saveTempShow(){
+    try { sessionStorage.setItem(tempKey(), JSON.stringify([...tempShow])); } catch {}
+  }
+  function clearTempShow(){
+    tempShow.clear();
+    try { sessionStorage.removeItem(tempKey()); } catch {}
   }
 
-  // expose globals for menu
-  W.ao3hExportHiddenWorks = exportHidden;
-  W.ao3hImportHiddenWorks = importHidden;
+  /* -------------------------- cancelable debounce ------------------------- */
+  function makeDebounce(fn, ms=120){
+    let t = null;
+    const deb = (...a)=>{
+      clearTimeout(t);
+      t = setTimeout(()=>{ fn(...a); }, ms);
+    };
+    deb.cancel = ()=>{ clearTimeout(t); t = null; };
+    return deb;
+  }
 
-  /* ------------------------------ Enhancer ------------------------------- */
-  let hiddenCache = new Map(); // workId -> record
-  let initDone = false;
+  let active = false;            // gate to ignore late timers
+  let mo = null;
+  let clickHandler = null;
+  let navEvtHandler = null;
+  let busUnsub = null;
+
+  function guarded(fn){ return (...a)=>{ if (!active) return; fn(...a); }; }
 
   async function refreshCache(){
     await openDB();
@@ -211,88 +223,297 @@
     hiddenCache = new Map(all.map(r => [r.workId, r]));
   }
 
-  function enhanceListOnce(){
-    // Add buttons and apply existing hides
+  function applyStoredHides(){
+    if (!active) return;
     const blurbs = queryAllBlurbs();
-    if (!blurbs.length) return;
-
-    blurbs.forEach(blurb=>{
-      ensureHideButton(blurb);
+    for (const blurb of blurbs){
       const id = getWorkIdFromBlurb(blurb);
-      if (!id) return;
+      if (!id) continue;
       const rec = hiddenCache.get(id);
-      if (rec?.isHidden) hideWork(blurb, rec.reason || '');
-    });
+
+      // if user has temp-shown this work, keep it visible even if DB says hidden
+      if (rec?.isHidden) {
+        if (tempShow.has(id)) {
+          showWork(blurb);          // ensure bar is gone and content visible
+          ensureHideButton(blurb);
+        } else {
+          ensureHideButton(blurb);
+          hideWork(blurb, rec.reason || '');
+        }
+      } else {
+        // DB says visible
+        showWork(blurb);
+        ensureHideButton(blurb);
+      }
+    }
   }
 
-  const enhance = debounce(() => {
-    try {
-      enhanceListOnce();
-    } catch (e) { console.error('[AO3H][HideFanficWithNotes] enhance failed', e); }
-  }, 120);
+  function enhanceListOnce(){
+    if (!active) return;
+    const blurbs = queryAllBlurbs();
+    if (!blurbs.length) return;
+    blurbs.forEach(ensureHideButton);
+    applyStoredHides();
+  }
 
-  /* ------------------------------- Init ---------------------------------- */
-  async function init(){
-    if (!isListPage()) return;
+  const enhance = makeDebounce(()=>{ if (active) try{ enhanceListOnce(); }catch(e){ console.error('[AO3H][HFN] enhance failed', e); } }, 120);
+
+  /* ------------------------------- Lifecycle ------------------------------ */
+  async function start(){
+    active = true;
+
+    // restore temp-show allowlist for this path
+    tempShow = loadTempShow();
+
     await refreshCache();
     enhanceListOnce();
 
-    // Click handlers (delegated)
-    document.addEventListener('click', async (e)=>{
-      // Hide button
-      const hideBtn = e.target.closest?.('.'+NS+'-hide-btn');
-      if (hideBtn){
-        const blurb = hideBtn.closest('li.blurb') || hideBtn.closest('.blurb') || hideBtn.closest('li');
-        if (!blurb) return;
-        const id = getWorkIdFromBlurb(blurb);
-        if (!id) return;
-        try{
-          const existing = hiddenCache.get(id);
-          const picked = await pickReason(existing?.reason || '');
-          if (picked == null) return; // canceled
-          hideWork(blurb, picked);
-          await put({ workId:id, reason:String(picked), isHidden:true });
-          hiddenCache.set(id, { workId:id, reason:String(picked), isHidden:true });
-        }catch(err){ console.error('[AO3H][HideFanficWithNotes] hide click failed', err); }
+    // SINGLE, hardened, guarded click handler
+    clickHandler = guarded(async (e)=>{
+// ---- Hide button on blurb header ----
+const hideBtn = e.target?.closest?.('.' + NS + '-hide-btn');
+if (hideBtn){
+  const blurb = hideBtn.closest('li.blurb') || hideBtn.closest('.blurb') || hideBtn.closest('li');
+  const id = getWorkIdFromBlurb(blurb);
+  if (!blurb || !id) return;
+
+  try{
+    const existing = hiddenCache.get(id);
+
+    // 1) If it was temp-shown (or visible but marked hidden), re-hide with existing note — no picker.
+    const wasTempShown = existing?.isHidden && tempShow.has(id);
+    const isVisibleButShouldBeHidden = existing?.isHidden && !blurb.querySelector('.' + NS + '-hidebar');
+    if (wasTempShown || isVisibleButShouldBeHidden){
+      tempShow.delete(id); saveTempShow();
+      const reason = existing?.reason || '';
+      hideWork(blurb, reason);
+      await put({ workId:id, reason:String(reason), isHidden:true });
+      hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
+      return;
+    }
+
+    // 2) Quick toggle — any modifier key skips the picker.
+    const quick = e.shiftKey || e.altKey || e.ctrlKey || e.metaKey;
+    if (quick){
+      tempShow.delete(id); saveTempShow();
+      const reason = existing?.reason || '';
+      hideWork(blurb, reason);
+      await put({ workId:id, reason:String(reason), isHidden:true });
+      hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
+      return;
+    }
+
+    // 3) Default: open the picker (new hide or you want to edit the note).
+    const picked = await pickReason(existing?.reason || '');
+    if (picked == null) return;
+    if (!blurb.isConnected) return; // re-check after await
+
+    tempShow.delete(id); saveTempShow();
+    hideWork(blurb, picked);
+    await put({ workId:id, reason:String(picked), isHidden:true });
+    hiddenCache.set(id, { workId:id, reason:String(picked), isHidden:true });
+  }catch(err){
+    console.error('[AO3H][HFN] hide click failed', err);
+  }
+  return;
+}
+
+
+
+      // ---- Actions inside the hide bar ----
+      const bar = e.target?.closest?.('.' + NS + '-hidebar');
+      if (!bar) return;
+
+      // Resolve blurb + id *now*, before any async
+      const blurb = bar.closest('li.blurb') || bar.closest('.blurb') || bar.closest('li');
+      const id = getWorkIdFromBlurb(blurb);
+      if (!blurb || !id) return;
+
+      if (e.target.classList.contains('show')){
+        // Temporary reveal: DB unchanged, but remember exemption
+        showWork(blurb);
+        tempShow.add(id); saveTempShow();
         return;
       }
 
-      // Bar actions
-      const bar = e.target.closest?.('.'+NS+'-hidebar');
-      if (!bar) return;
-      const blurb = bar.closest('li.blurb') || bar.closest('.blurb') || bar.closest('li');
-      const id = getWorkIdFromBlurb(blurb);
-      if (!id) return;
+      if (e.target.classList.contains('unhide')){
+        if (!confirm('Unhide this work permanently? (Note will be kept)')) return;
+        if (!blurb.isConnected) return; // safeguard
 
-      if (e.target.classList.contains('show')){
-        // temporary show; do not change DB
         showWork(blurb);
-      } else if (e.target.classList.contains('unhide')){
-        if (!confirm('Unhide this work permanently?')) return;
-        showWork(blurb);
-        await put({ workId:id, reason:'', isHidden:false });
-        hiddenCache.set(id, { workId:id, reason:'', isHidden:false });
-      } else if (e.target.classList.contains('edit')){
+        tempShow.delete(id); saveTempShow();   // no exemption needed anymore
+        const rec = hiddenCache.get(id);
+        const reason = rec?.reason || bar.querySelector('.reason')?.textContent || '';
+        await put({ workId:id, reason:String(reason), isHidden:false });
+        hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:false });
+        return;
+      }
+
+      if (e.target.classList.contains('edit')){
         const current = bar.querySelector('.reason')?.textContent || '';
         const next = await pickReason(current);
         if (next == null) return;
-        bar.querySelector('.reason').textContent = String(next);
+
+        // after await, make sure blurb/bar still exist
+        if (!blurb.isConnected) return;
+        const barNow = blurb.querySelector('.' + NS + '-hidebar');
+        if (!barNow) return;
+
+        barNow.querySelector('.reason').textContent = String(next);
         await put({ workId:id, reason:String(next), isHidden:true });
         hiddenCache.set(id, { workId:id, reason:String(next), isHidden:true });
+        // keep tempShow as-is (if they temporarily showed earlier, keep it visible)
+        return;
       }
-    }, false);
+    });
 
-    // Watch for DOM changes (pagination, AO3 dynamic inserts, etc.)
-    observe(document.body, enhance);
-    // Also rerun if our flags or route change
-    document.addEventListener(`${NS}:navigated`, enhance);
+    // ATTACH IT
+    document.addEventListener('click', clickHandler, false);
+
+    mo = observe(document.body, ()=> enhance()); // schedule only; enhance checks 'active'
+
+    navEvtHandler = guarded(()=> enhance());
+    document.addEventListener(`${NS}:navigated`, navEvtHandler);
+    if (AO3H.bus?.on){
+      const fn = guarded(()=> enhance());
+      AO3H.bus.on('navigated', fn);
+      busUnsub = ()=> { try{ AO3H.bus.off?.('navigated', fn); }catch{} };
+    }
   }
 
-  AO3H.register?.({
-    id: MOD_ID,
-    title: 'Hide fanfic (with notes)',
-    defaultFlagKey: 'hideFanficWithNotes',
-    init: async ({ enabled }) => { if (enabled) onReady(init); },
-  });
+  function stop(){
+    active = false;
+
+    try { document.removeEventListener('click', clickHandler, false); } catch {}
+    clickHandler = null;
+
+    try { document.removeEventListener(`${NS}:navigated`, navEvtHandler); } catch {}
+    navEvtHandler = null;
+
+    try { mo?.disconnect?.(); } catch {}
+    mo = null;
+
+    try { busUnsub?.(); } catch {}
+    busUnsub = null;
+
+    try { enhance.cancel?.(); } catch {}
+
+    // Clear temp-show list when turning the module off (so re-enable respects DB)
+    clearTempShow();
+
+    // HARD RESET visuals (legacy-safe)
+    unhideAllOnPage();
+    removeHideButtons();
+  }
+
+  /* ===== Hidden works Import/Export hooks — place before AO3H.modules.register(...) ===== */
+(() => {
+  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+  // Don’t redefine if already present
+  if (typeof W.ao3hExportHiddenWorks === 'function' || typeof W.ao3hImportHiddenWorks === 'function') return;
+
+  const NS = (W.AO3H && W.AO3H.env && W.AO3H.env.NS) || 'ao3h';
+  const STORAGE_KEY = `${NS}.hiddenWorks`;
+
+  // Read/write helpers — GM_* if available, else localStorage
+  const readHidden = () => {
+    try { if (typeof GM_getValue === 'function') return JSON.parse(GM_getValue(STORAGE_KEY, '[]')); } catch {}
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch {}
+    return [];
+  };
+  const writeHidden = (val) => {
+    const json = JSON.stringify(val, null, 2);
+    try { if (typeof GM_setValue === 'function') GM_setValue(STORAGE_KEY, json); } catch {}
+    try { (document.body || document.documentElement) && localStorage.setItem(STORAGE_KEY, json); } catch {}
+  };
+
+  const downloadJSON = (filename, text) => {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.rel = 'noopener';
+    (document.body || document.documentElement).appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+  };
+
+  function exportHiddenWorks() {
+    const data = readHidden();
+    const stamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    downloadJSON(`ao3-hidden-works-${stamp}.json`, JSON.stringify(data, null, 2));
+  }
+
+  function importHiddenWorks() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const incoming = JSON.parse(String(reader.result || '[]'));
+          const current  = readHidden();
+          let next;
+          if (Array.isArray(current) && Array.isArray(incoming)) {
+            const keyOf = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v) : JSON.stringify(v);
+            const seen = new Set(current.map(keyOf));
+            next = current.slice();
+            for (const item of incoming) {
+              const k = keyOf(item);
+              if (!seen.has(k)) { seen.add(k); next.push(item); }
+            }
+            alert(`Imported ${next.length - current.length} new item(s). Total: ${next.length}.`);
+          } else {
+            next = incoming;
+            alert('Imported list (overwrote previous value).');
+          }
+          writeHidden(next);
+          try { document.dispatchEvent(new CustomEvent(`${NS}:hidden-works-updated`, { detail:{ count: next?.length || 0 } })); } catch {}
+        } catch (e) {
+          alert('Invalid JSON: ' + e.message);
+        } finally {
+          input.remove();
+        }
+      };
+      reader.readAsText(file);
+    }, { once:true });
+    (document.body || document.documentElement).appendChild(input);
+    input.click();
+  }
+
+  // Expose to PAGE for the menu dialog
+  W.ao3hExportHiddenWorks = exportHiddenWorks;
+  W.ao3hImportHiddenWorks = importHiddenWorks;
+})();
+
+  /* --------------------------- Module registration ------------------------ */
+  function register(){
+    if (AO3H.modules && typeof AO3H.modules.register === 'function') {
+      AO3H.modules.register(MOD_ID, { title: 'Hide fanfic (with notes)', enabledByDefault: true }, async ()=>{
+        onReady(start);
+        return () => stop();
+      });
+    } else {
+      AO3H.register?.({
+        id: MOD_ID,
+        title: 'Hide fanfic (with notes)',
+        defaultFlagKey: 'hideFanficWithNotes',
+        init: async ({ enabled }) => { if (enabled) onReady(start); return ()=>stop(); },
+        onFlagsUpdated: async ({ enabled }) => { enabled ? start() : stop(); },
+      });
+    }
+
+    // Safety net: react if flags flip directly
+    try {
+      AO3H.flags?.watch?.(FLAG_CAN, v => { v ? onReady(start) : stop(); });
+      if (FLAG_ALT !== FLAG_CAN) AO3H.flags?.watch?.(FLAG_ALT, v => { v ? onReady(start) : stop(); });
+    } catch {}
+  }
+
+  register();
 
 })();
