@@ -228,7 +228,7 @@
   function registerWithDisposer(){
     // Prefer new registry if present
     if (AO3H.modules && typeof AO3H.modules.register === 'function') {
-      AO3H.modules.register('AutoSearchFilters', { title: 'Auto search filters (5k+, complete, EN)', enabledByDefault: true }, async () => {
+      AO3H.modules.register('AutoSearchFilters', { title: 'Auto search filters', enabledByDefault: true }, async () => {
         // start
         enabled = true;
         onReady(run);
