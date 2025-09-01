@@ -46,6 +46,12 @@ const HOVER_CLOSE_DELAY = 250; // ms (tweak to taste)
       --${NS}-pad-x: .8em;
       --${NS}-ring: 2px solid rgba(255,255,255,.6);
     }
+      
+    #header .menu > li{
+    margin: 0 !important;
+  }
+
+
 
     .${NS}-navlink{
       color:#fff;
@@ -96,28 +102,66 @@ const HOVER_CLOSE_DELAY = 250; // ms (tweak to taste)
     }
   `;
 
-  /* ========== Submenu (Manage ▸) — click-only, starts closed ========== */
-  M_injectCSS`
-    .${NS}-menu li { position: relative; }
-    .${NS}-caret { opacity:.7; margin-left:auto; }
+/* ========== Submenu (Manage ▾) — inline, same style as main menu ========== */
+M_injectCSS`
+  /* Keep normal flow: no absolute positioning */
+  .${NS}-menu li { position: static; }
 
-    .${NS}-submenu{
-      position:absolute; left:100%; top:0;
-      min-width:220px;
-      display:none !important;
-      visibility:hidden !important;
-      z-index:10000;
-    }
-    .${NS}-submenu.open{
-      display:block !important;
-      visibility:visible !important;
-    }
+  /* The submenu container disappears from layout when closed,
+     and becomes a "pass-through" when open so its <li>s behave
+     like siblings of other menu items. */
+  .${NS}-submenu{
+    position: static !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-width: 0 !important;
+    list-style: none;
+    display: none !important;        /* hidden by default */
+    visibility: visible !important;  /* ensure earlier rules don't hide children */
+    transform: none !important;
+    z-index: auto;
+  }
+  .${NS}-submenu.open{
+    display: contents !important;    /* flatten: children render inline with menu */
+  }
 
-    .${NS}-submenu a{
-      display:flex; align-items:center; justify-content:space-between;
-      gap:var(--${NS}-gap); padding:.35rem .75rem;
-    }
-  `;
+  /* Rows inside submenu inherit the exact same styling as .${NS}-menu a,
+     but if you want a subtle indent, keep this; otherwise remove it. */
+  .${NS}-submenu a{
+    display:flex; align-items:center; justify-content:space-between;
+    gap: var(--${NS}-gap); padding:.35rem .75rem;
+  }
+  .${NS}-submenu a .${NS}-label{ padding-left: .75rem; } /* optional indent */
+
+  /* Caret feedback (flip when expanded) */
+  .${NS}-caret{ transition: transform .15s ease; }
+  li > a[aria-expanded="true"] .${NS}-caret{ transform: rotate(180deg); }
+`;
+
+/* === Make Manage submenu inherit normal menu hover, without changing layout === */
+M_injectCSS`
+  /* Keep submenu in normal flow; only show when .open */
+  .${NS}-menu li { position: static; }
+  .${NS}-submenu{
+    display: none !important;
+  }
+  .${NS}-submenu.open{
+    display: contents !important;   /* children render like normal menu rows */
+  }
+
+  /* Neutralize .dropdown-menu container layout so it doesn't float/transform */
+  .${NS}-submenu.dropdown-menu{
+    position: static !important;
+    left: auto !important; right: auto !important; top: auto !important;
+    margin: 0 !important; padding: 0 !important; min-width: 0 !important;
+    border: 0 !important; background: transparent !important; box-shadow: none !important;
+    transform: none !important;
+  }
+`;
+
 
   /* ========== Toggle switch visuals (green ON, grey OFF) ========== */
   M_injectCSS`
@@ -126,7 +170,7 @@ const HOVER_CLOSE_DELAY = 250; // ms (tweak to taste)
       --${NS}-switch-off: #aab1bd;
     }
     .${NS}-menu a{ align-items:center; }
-    .${NS}-label{ flex:1 1 auto; min-width:0; }
+    .${NS}-label{ flex:1 1 auto; min-width:0; font-size: 12px; }
     .${NS}-switch{ margin-left:.75rem; flex:0 0 40px; }
 
     .${NS}-switch{
@@ -181,9 +225,9 @@ const HOVER_CLOSE_DELAY = 250; // ms (tweak to taste)
     .${NS}-switch{
       flex: 0 0 40px !important;
       width: 40px !important;
-      height: 16px !important;
+      height: 12px !important;
       margin-left: .5rem !important;
-      border-radius: 16px;
+      border-radius: 12px;
       background: var(--${NS}-switch-off);
       position: relative;
       box-shadow: inset 2px 2px rgba(0,0,0,.2);
@@ -194,14 +238,14 @@ const HOVER_CLOSE_DELAY = 250; // ms (tweak to taste)
       position: absolute;
       top: -2px;
       left: -2px;
-      width: 18px; height: 18px;
+      width: 14px; height: 14px;
       border-radius: 20px;
       background: #ddd;
       border: 1px solid rgba(0,0,0,.1);
       box-shadow: inset 2px 2px rgba(255,255,255,.6), inset -1px -1px rgba(0,0,0,.1);
       transition: left .3s ease;
     }
-    .${NS}-menu a.${NS}-on .${NS}-switch::after{ left: calc(100% - 18px); }
+    .${NS}-menu a.${NS}-on .${NS}-switch::after{ left: calc(100% - 14px); }
     @media (prefers-color-scheme: dark){ :root{ --${NS}-switch-off:#7a8699; } }
   `;
 
@@ -345,45 +389,55 @@ function openIE() {
   }
 
   // Submenu builder for "Manage ▸" — CLICK ONLY, starts closed
-  function itemSubmenu(label, buildChildren){
-    const li  = document.createElement('li');
+function itemSubmenu(label, buildChildren){
+  const li  = document.createElement('li');
 
-    const a   = document.createElement('a');
-    a.href = '#';
-    a.innerHTML = `<span class="${NS}-label">${label}</span><span class="${NS}-caret">▸</span>`;
-    a.setAttribute('aria-haspopup','true');
-    a.setAttribute('aria-expanded','false');
+  const a   = document.createElement('a');
+  a.href = '#';
+  a.innerHTML = `<span class="${NS}-label">${label}</span><span class="${NS}-caret">▾</span>`;
+  a.setAttribute('aria-haspopup','true');
+  a.setAttribute('aria-expanded','false');
 
-    const sub = document.createElement('ul');
-    sub.className = `menu ${NS}-submenu`;
-    sub.setAttribute('role','menu');
+   const sub = document.createElement('ul');
+sub.className = `menu dropdown-menu ${NS}-submenu`; // inherit site hover styles
+  sub.setAttribute('role','menu');
 
-    buildChildren(sub);
+  buildChildren(sub);
 
-    const toggle = (force) => {
-      const isOpen = sub.classList.contains('open');
-      const next = (typeof force === 'boolean') ? force : !isOpen;
-      sub.classList.toggle('open', next);
-      a.setAttribute('aria-expanded', String(next));
-    };
+  // Helper: if near right edge, align submenu to the right
+  const maybeAlignRight = () => {
+    const r = a.getBoundingClientRect();
+    const willOverflowRight = (r.left + 240) > (window.innerWidth - 12); // 240 ≈ min-width + padding
+    sub.classList.toggle(`${NS}-align-right`, !!willOverflowRight);
+  };
 
-    a.addEventListener('click', (e)=>{ e.preventDefault(); toggle(); });
+  const toggle = (force) => {
+    const isOpen = sub.classList.contains('open');
+    const next = (typeof force === 'boolean') ? force : !isOpen;
+    if (next) { maybeAlignRight(); }
+    sub.classList.toggle('open', next);
+    a.setAttribute('aria-expanded', String(next));
+  };
 
-    a.addEventListener('keydown', (e)=>{
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); toggle(true); sub.querySelector('a')?.focus(); }
-    });
-    sub.addEventListener('keydown', (e)=>{
-      if (e.key === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); toggle(false); a.focus(); }
-    });
+  a.addEventListener('click', (e)=>{ e.preventDefault(); toggle(); });
 
-    document.addEventListener('pointerdown', (ev)=>{
-      if (!li.contains(ev.target)) toggle(false);
-    });
+  // keyboard: Enter/Space open; ArrowDown opens & focuses first item; ArrowUp closes
+  a.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(true); sub.querySelector('a')?.focus(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); toggle(true); sub.querySelector('a')?.focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); toggle(false); }
+  });
+  sub.addEventListener('keydown', (e)=>{
+    if (e.key === 'ArrowUp' || e.key === 'Escape') { e.preventDefault(); toggle(false); a.focus(); }
+  });
 
-    li.append(a, sub);
-    return li;
-  }
+  // clicking outside closes it
+  document.addEventListener('pointerdown', (ev)=>{ if (!li.contains(ev.target)) toggle(false); });
+
+  li.append(a, sub);
+  return li;
+}
+
 
 function fillMenu(){
   M_menuUL.innerHTML = '';
