@@ -1,0 +1,389 @@
+/* == AO3H Module: ReadingStats ========================================== */
+(function () {
+  const { util, routes, store, menu } = AO3H;
+  const { $, $$, css, observe, debounce, throttle, log } = util;
+
+  AO3H.register('ReadingStats', {
+    title: 'Reading Stats',
+
+    init() {
+      /* ----------------------- CONFIG / STORAGE ----------------------- */
+      const CFG_KEY = 'ReadingStats:cfg';
+      const DB_KEY  = 'ReadingStats:data';
+
+      const defaults = {
+        thresholdFrac: 0.95,    // mark chapter as read when >= 95% scrolled
+        minWordsToCount: 200,   // ignore tiny chapters
+        wpm: 220,               // for ETA, if needed later
+        toastAchievements: true
+      };
+      let cfg = Object.assign({}, defaults, store.lsGet(CFG_KEY, defaults));
+      const saveCfg = () => store.lsSet(CFG_KEY, cfg);
+
+      // DB schema (kept intentionally small per entry)
+      // {
+      //   totals: { words:0, works:0 },
+      //   days:   { 'YYYY-MM-DD': { words:0, works:0 } },
+      //   months: { 'YYYY-MM': { words:0, works:0, tags:{ [tag]: count } } },
+      //   works:  { [workId]: { title, words, tags:[], finishedAt, chaptersDone: { [chapterIndex]: true } } },
+      //   timeline: [ { ts, workId, title, words, tags:[], chapterIndex, chapterWords } ],
+      //   achievements: { unlocked: { [badgeId]: ts } }
+      // }
+      let db = store.lsGet(DB_KEY, null) || {
+        totals: { words: 0, works: 0 },
+        days:   {},
+        months: {},
+        works:  {},
+        timeline: [],
+        achievements: { unlocked: {} }
+      };
+      const persist = debounce(() => store.lsSet(DB_KEY, db), 300);
+
+      /* ----------------------------- CSS ------------------------------ */
+      css(`
+        .ao3h-stats-toast {
+          position: fixed; right: 16px; bottom: 16px; z-index: 999999;
+          background: rgba(20,20,20,.9); color:#fff; padding:10px 12px;
+          border-radius: 12px; font:13px/1.2 system-ui,sans-serif; box-shadow:0 10px 24px rgba(0,0,0,.35);
+        }
+        .ao3h-stats-modal {
+          position: fixed; inset: 0; z-index: 999998; background: rgba(0,0,0,.45);
+          display:flex; align-items:center; justify-content:center;
+        }
+        .ao3h-stats-card {
+          max-width: 960px; width: calc(100% - 32px); max-height: 85vh; overflow:auto;
+          background: var(--ao3h-card-bg, #fff); color: #111; border-radius: 14px; padding: 16px 18px;
+          box-shadow: 0 20px 40px rgba(0,0,0,.35);
+        }
+        @media (prefers-color-scheme: dark){
+          .ao3h-stats-card{ --ao3h-card-bg: #161616; color:#eee; }
+        }
+        .ao3h-grid { display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+        .ao3h-tile { grid-column: span 4; background: rgba(0,0,0,.06); border-radius: 10px; padding: 10px; }
+        @media (prefers-color-scheme: dark){ .ao3h-tile{ background: rgba(255,255,255,.06); } }
+        .ao3h-bar { height: 40px; display:flex; align-items:flex-end; gap:4px; }
+        .ao3h-bar div { width: 3%; min-width: 6px; background: rgba(59,130,246,.6); }
+        .ao3h-taglist li { display:flex; justify-content:space-between; padding:2px 0; }
+        .ao3h-stats-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+        .ao3h-btn {
+          all:unset; cursor:pointer; padding:6px 10px; border-radius:8px;
+          background: rgba(0,0,0,.08);
+        }
+        @media (prefers-color-scheme: dark){ .ao3h-btn{ background: rgba(255,255,255,.08); } }
+        .ao3h-micro { opacity:.75; font-size:12px; }
+      `, 'ao3h-reading-stats');
+
+      /* ------------------------ HELPERS ------------------------ */
+      const todayKey = () => new Date().toISOString().slice(0,10);         // YYYY-MM-DD
+      const monthKey = () => new Date().toISOString().slice(0,7);          // YYYY-MM
+      const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
+
+      function parseIntSafe(txt) {
+        const n = parseInt(String(txt || '').replace(/[^0-9]/g, ''), 10);
+        return Number.isFinite(n) ? n : null;
+      }
+      function getWorkMeta() {
+        const title = document.querySelector('#workskin .title')?.textContent?.trim()
+                   || document.querySelector('h2.title')?.textContent?.trim()
+                   || document.title.replace(/\s*-\s*Archive.*$/,'').trim();
+        const wordsNode = document.querySelector('.work.meta .words, dd.words');
+        const totalWords = parseIntSafe(wordsNode?.textContent);
+        const chNode = document.querySelector('.work.meta .chapters, dd.chapters');
+        let idx = 1, total = 1;
+        if (chNode) {
+          const m = chNode.textContent.trim().match(/(\d+)\s*\/\s*(\d+|\?)/);
+          if (m) { idx = parseIntSafe(m[1]) || 1; total = m[2] === '?' ? 1 : (parseIntSafe(m[2]) || 1); }
+        }
+        const tags = Array.from(document.querySelectorAll('dd.freeform.tags a, dd.relationship.tags a, dd.character.tags a, dd.fandom.tags a'))
+          .map(a => a.textContent.trim()).filter(Boolean);
+        return { title, totalWords, chapterIndex: idx, chapterTotal: total, tags };
+      }
+      function estimateChapterWords(totalWords, chapterIndex, chapterTotal) {
+        if (totalWords && chapterTotal > 1) return Math.round(totalWords / chapterTotal);
+        if (totalWords) return totalWords;
+        // Fallback: approximate by text length / 5
+        const textLen = ($('#workskin')?.innerText || '').length;
+        const est = Math.round(textLen / 5);
+        return est || null;
+      }
+      function scrollFrac() {
+        const el = document.scrollingElement || document.documentElement;
+        const max = el.scrollHeight - innerHeight;
+        if (max <= 0) return 1;
+        return clamp(scrollY / max, 0, 1);
+      }
+      function workIds() {
+        const mw = location.pathname.match(/\/works\/(\d+)/);
+        const mc = location.pathname.match(/\/works\/\d+\/chapters\/(\d+)/);
+        return { workId: mw ? mw[1] : null, chapterId: mc ? mc[1] : null };
+      }
+
+      /* ---------------------- ACHIEVEMENTS ---------------------- */
+      const BADGES = [
+        { id:'words_100k',  name:'100k words',     test:db => db.totals.words >= 100000 },
+        { id:'words_500k',  name:'500k words',     test:db => db.totals.words >= 500000 },
+        { id:'words_1m',    name:'1M words',       test:db => db.totals.words >= 1000000 },
+        { id:'works_50',    name:'50 works',       test:db => db.totals.works >= 50 },
+        { id:'works_200',   name:'200 works',      test:db => db.totals.works >= 200 },
+        { id:'streak_7',    name:'7-day streak',   test:db => computeStreak(db) >= 7 },
+        { id:'streak_30',   name:'30-day streak',  test:db => computeStreak(db) >= 30 }
+      ];
+      function computeStreak(db) {
+        // count consecutive days (including today) with words > 0
+        let streak = 0;
+        const today = new Date();
+        for (let i=0;i<400;i++){
+          const d = new Date(today); d.setDate(today.getDate() - i);
+          const key = d.toISOString().slice(0,10);
+          if (db.days[key]?.words > 0) streak++;
+          else break;
+        }
+        return streak;
+      }
+      function maybeUnlockBadges() {
+        BADGES.forEach(b => {
+          if (db.achievements.unlocked[b.id]) return;
+          if (b.test(db)) {
+            db.achievements.unlocked[b.id] = Date.now();
+            persist();
+            if (cfg.toastAchievements) toast(`🏅 Achievement unlocked: ${b.name}`);
+          }
+        });
+      }
+
+      /* -------------------------- TOAST -------------------------- */
+      let toastEl=null, toastTimer=0;
+      function toast(text){
+        try{ if (toastEl) toastEl.remove(); }catch{}
+        toastEl = document.createElement('div');
+        toastEl.className = 'ao3h-stats-toast';
+        toastEl.textContent = text;
+        document.body.appendChild(toastEl);
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(()=>{ try{ toastEl.remove(); }catch{} toastEl=null; }, 3000);
+      }
+
+      /* --------------------- LOGGING EVENT ---------------------- */
+      let markedThisChapter = false;
+      function tryMarkRead() {
+        if (!(routes.isWork() || routes.isChapter())) return;
+        if (markedThisChapter) return;
+
+        const frac = scrollFrac();
+        if (frac < cfg.thresholdFrac) return;
+
+        const { workId } = workIds();
+        if (!workId) return;
+
+        const meta = getWorkMeta();
+        const chWords = estimateChapterWords(meta.totalWords, meta.chapterIndex, meta.chapterTotal);
+        if (!chWords || chWords < cfg.minWordsToCount) return;
+
+        // Per-work record
+        const w = db.works[workId] || (db.works[workId] = {
+          title: meta.title, words: 0, tags: meta.tags, finishedAt: null, chaptersDone: {}
+        });
+        if (w.chaptersDone[meta.chapterIndex]) { markedThisChapter = true; return; } // already counted
+
+        // Record chapter done
+        w.chaptersDone[meta.chapterIndex] = true;
+        w.words += chWords;
+        w.title = meta.title || w.title;
+        w.tags  = meta.tags?.length ? meta.tags : w.tags;
+
+        // If all known chapters done, count as a finished work
+        const justFinishedWork = (meta.chapterTotal <= 1) ||
+                                 (Object.keys(w.chaptersDone).length >= meta.chapterTotal);
+
+        // Rollups
+        const day = todayKey(), month = monthKey();
+        db.days[day]   = db.days[day]   || { words:0, works:0 };
+        db.months[month]= db.months[month]|| { words:0, works:0, tags:{} };
+        db.days[day].words     += chWords;
+        db.months[month].words += chWords;
+
+        // Tag stats (count once per finished chapter event; coarse but useful)
+        (meta.tags || []).forEach(t => {
+          db.months[month].tags[t] = (db.months[month].tags[t] || 0) + 1;
+        });
+
+        // Timeline entry
+        db.timeline.push({
+          ts: Date.now(),
+          workId, title: w.title,
+          words: chWords, tags: (meta.tags || []).slice(0,8),
+          chapterIndex: meta.chapterIndex, chapterWords: chWords
+        });
+
+        // Update totals / finished works
+        db.totals.words += chWords;
+        if (justFinishedWork && !w.finishedAt) {
+          w.finishedAt = Date.now();
+          db.totals.works += 1;
+          db.days[day].works  += 1;
+          db.months[month].works += 1;
+        }
+
+        persist();
+        maybeUnlockBadges();
+        markedThisChapter = true;
+        log.info('[AO3H][ReadingStats] recorded', { workId, ch: meta.chapterIndex, chWords, justFinishedWork });
+      }
+
+      /* ----------------------- WIRING / OBS ---------------------- */
+      function onScroll() { tryMarkRead(); }
+      function onNavChange() { markedThisChapter = false; setTimeout(tryMarkRead, 50); }
+
+      if (routes.isWork() || routes.isChapter()) {
+        addEventListener('scroll', throttle(onScroll, 150), { passive: true });
+        // also try once on load in case you reload near bottom
+        setTimeout(tryMarkRead, 250);
+      }
+      const mo = observe(document.body, { childList:true, subtree:true }, debounce(onNavChange, 200));
+
+      /* ------------------------- DASHBOARD ------------------------- */
+      let modal=null;
+      function openDashboard(){
+        if (modal) closeDashboard();
+        modal = document.createElement('div');
+        modal.className = 'ao3h-stats-modal';
+        modal.innerHTML = `
+          <div class="ao3h-stats-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h2 style="margin:0;">Reading Stats</h2>
+              <button class="ao3h-btn" data-x>Close</button>
+            </div>
+            <div class="ao3h-grid">
+              <div class="ao3h-tile" style="grid-column: span 4;">
+                <h3>Overview</h3>
+                <div>Words read: <b>${fmtNum(db.totals.words)}</b></div>
+                <div>Works finished: <b>${fmtNum(db.totals.works)}</b></div>
+                <div class="ao3h-micro">Current streak: ${computeStreak(db)} days</div>
+                <div class="ao3h-stats-actions" style="margin-top:8px;">
+                  <button class="ao3h-btn" data-export>Export JSON</button>
+                  <button class="ao3h-btn" data-reset>Reset…</button>
+                </div>
+              </div>
+              <div class="ao3h-tile" style="grid-column: span 8;">
+                <h3>Last 30 days</h3>
+                <div class="ao3h-bar">${last30BarsHTML()}</div>
+                <div class="ao3h-micro">Daily words (each bar = day; today at right)</div>
+              </div>
+              <div class="ao3h-tile" style="grid-column: span 6;">
+                <h3>This month tags (top 10)</h3>
+                <ul class="ao3h-taglist">${monthTopTagsHTML()}</ul>
+              </div>
+              <div class="ao3h-tile" style="grid-column: span 6;">
+                <h3>Recent timeline</h3>
+                <ul class="ao3h-taglist">${timelineHTML(12)}</ul>
+              </div>
+              <div class="ao3h-tile" style="grid-column: span 12;">
+                <h3>Achievements</h3>
+                <div>${achievementsHTML()}</div>
+              </div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('[data-x]').addEventListener('click', closeDashboard);
+        modal.addEventListener('click', (e)=>{ if (e.target === modal) closeDashboard(); });
+        modal.querySelector('[data-export]').addEventListener('click', onExport);
+        modal.querySelector('[data-reset]').addEventListener('click', onReset);
+      }
+      function closeDashboard(){ try{ modal.remove(); }catch{} modal=null; }
+      function fmtNum(n){ return (n||0).toLocaleString(); }
+
+      function last30BarsHTML(){
+        const bars = [];
+        const today = new Date();
+        // compute max in window for scaling
+        let max = 0;
+        const vals = [];
+        for (let i=29;i>=0;i--){
+          const d = new Date(today); d.setDate(today.getDate()-i);
+          const key = d.toISOString().slice(0,10);
+          const v = db.days[key]?.words || 0;
+          vals.push(v); max = Math.max(max, v);
+        }
+        const scale = max > 0 ? 42 / max : 0;
+        vals.forEach(v => {
+          const h = Math.round(v * scale);
+          bars.push(`<div title="${fmtNum(v)} words" style="height:${h}px;"></div>`);
+        });
+        return bars.join('');
+      }
+
+      function monthTopTagsHTML(){
+        const mk = monthKey();
+        const tags = db.months[mk]?.tags || {};
+        const pairs = Object.entries(tags).sort((a,b)=>b[1]-a[1]).slice(0,10);
+        if (!pairs.length) return '<li class="ao3h-micro">No data yet.</li>';
+        return pairs.map(([t,c])=> `<li><span>${escapeHTML(t)}</span><b>${c}</b></li>`).join('');
+      }
+
+      function timelineHTML(n=10){
+        const items = db.timeline.slice(-n).reverse();
+        if (!items.length) return '<li class="ao3h-micro">No entries yet.</li>';
+        return items.map(it => {
+          const date = new Date(it.ts).toLocaleString();
+          const title = escapeHTML((it.title || '').slice(0,80));
+          return `<li><span>${date}</span><b>${fmtNum(it.words)} w</b> — ${title}${it.chapterIndex? ` (ch ${it.chapterIndex})` : ''}</li>`;
+        }).join('');
+      }
+
+      function achievementsHTML(){
+        const unlocked = db.achievements.unlocked || {};
+        return BADGES.map(b => {
+          const ts = unlocked[b.id];
+          return `<span class="ao3h-btn" title="${b.name}${ts ? ' — unlocked '+new Date(ts).toLocaleDateString() : ''}"
+                    style="margin:2px; ${ts ? 'background:rgba(16,185,129,.25);' : ''}">
+                    ${ts ? '🏅' : '⬜'} ${b.name}
+                  </span>`;
+        }).join(' ');
+      }
+
+      function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+      function onExport(){
+        const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `ao3h_reading_stats_${todayKey()}.json`;
+        a.click();
+        setTimeout(()=> URL.revokeObjectURL(url), 1000);
+      }
+
+      function onReset(){
+        if (!confirm('Reset all Reading Stats data? This cannot be undone.')) return;
+        db = {
+          totals: { words: 0, works: 0 },
+          days:   {}, months: {}, works: {}, timeline: [],
+          achievements: { unlocked: {} }
+        };
+        persist();
+        toast('Reading Stats reset.');
+        if (modal) { closeDashboard(); openDashboard(); }
+      }
+
+      /* -------------------------- MENU HOOKS -------------------------- */
+      try {
+        menu.addAction?.('Reading Stats…', openDashboard);
+        menu.addToggle?.('Achievement toasts', cfg.toastAchievements, (v)=>{ cfg.toastAchievements = !!v; saveCfg(); });
+        menu.addAction?.(`Threshold (now ${Math.round(cfg.thresholdFrac*100)}%)`, ()=>{
+          const v = prompt('Mark chapter as read at percent (e.g., 95)', String(Math.round(cfg.thresholdFrac*100)));
+          if (v==null) return;
+          const n = clamp(parseInt(v,10)||95, 50, 100);
+          cfg.thresholdFrac = n/100; saveCfg();
+        });
+        menu.rebuild?.();
+      } catch {}
+
+      /* ---------------------------- CLEANUP ---------------------------- */
+      return () => {
+        // Observers get auto GC’d with page; we avoid registering global listeners elsewhere
+      };
+    },
+
+    onFlagsUpdated() { /* managed by core lifecycle */ }
+  });
+})();

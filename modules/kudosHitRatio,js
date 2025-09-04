@@ -1,0 +1,190 @@
+/* == AO3H Module: KudosHitRatio ========================================= */
+(function () {
+  const { util, routes, menu } = AO3H;
+  const { $, $$, css, observe, debounce } = util;
+
+  AO3H.register('KudosHitRatio', {
+    title: 'Kudos/Hits Ratio',
+
+    init() {
+      const cfg = {
+        showOnWork: true,
+        showOnLists: true,
+        decimals: 1,          // 1 decimal place for %
+        colorize: true,       // color badges by ratio
+        addSortButton: true,  // client-side sort on list pages
+      };
+
+      css(`
+        .ao3h-khr-badge {
+          display:inline-flex; align-items:center; gap:4px;
+          padding:2px 6px; border-radius:8px; font:11px/1 system-ui, sans-serif;
+          background:rgba(0,0,0,.08); color:inherit; margin-left:8px;
+        }
+        .ao3h-khr-chip {
+          position:sticky; top:8px; align-self:flex-start;
+          display:inline-flex; gap:6px; align-items:center;
+          padding:4px 8px; border-radius:10px; font:12px/1 system-ui,sans-serif;
+          background:rgba(0,0,0,.65); color:#fff;
+        }
+        @media (prefers-color-scheme: dark) {
+          .ao3h-khr-badge { background:rgba(255,255,255,.08); }
+          .ao3h-khr-chip  { background:rgba(255,255,255,.85); color:#111; }
+        }
+        .ao3h-khr-good { background:rgba(16,185,129,.18) !important; }
+        .ao3h-khr-mid  { background:rgba(245,158,11,.18) !important; }
+        .ao3h-khr-low  { background:rgba(239,68,68,.18) !important; }
+        .ao3h-khr-sortbtn {
+          all:unset; cursor:pointer; padding:4px 8px; border-radius:6px;
+          background:rgba(0,0,0,.08); font:12px/1 system-ui,sans-serif; margin-left:8px;
+        }
+        @media (prefers-color-scheme: dark){ .ao3h-khr-sortbtn{ background:rgba(255,255,255,.08);} }
+      `, 'ao3h-khr');
+
+      const int = (t) => {
+        const n = parseInt(String(t||'').replace(/[^\d]/g,''), 10);
+        return Number.isFinite(n) ? n : null;
+      };
+
+      /* ---------- Work page chip ---------- */
+      let chip = null;
+      function readWorkStats(root=document) {
+        // AO3 meta often has dd.kudos / dd.hits; also appears under .stats sometimes
+        const kNode = root.querySelector('dd.kudos, .work.meta .kudos, .stats .kudos');
+        const hNode = root.querySelector('dd.hits,  .work.meta .hits,  .stats .hits');
+        const kudos = int(kNode?.textContent);
+        const hits  = int(hNode?.textContent);
+        return { kudos, hits };
+      }
+
+      function ratioPct(k, h) {
+        if (!k || !h || h <= 0) return null;
+        return (k / h) * 100;
+      }
+
+      function pctText(p, decimals=cfg.decimals) {
+        if (p == null) return '';
+        const r = p < 1 && decimals > 0 ? p.toFixed(decimals) : Math.round(p).toString();
+        return `${r}%`;
+      }
+
+      function colorClass(p) {
+        if (!cfg.colorize || p == null) return '';
+        if (p >= 20) return 'ao3h-khr-good';
+        if (p >= 8)  return 'ao3h-khr-mid';
+        return 'ao3h-khr-low';
+      }
+
+      function ensureWorkChip() {
+        if (chip || !cfg.showOnWork) return;
+        chip = document.createElement('span');
+        chip.className = 'ao3h-khr-chip';
+        const meta = document.querySelector('.work.meta, dl.meta') || document.body;
+        meta.appendChild(chip);
+      }
+
+      function updateWorkChip() {
+        if (!cfg.showOnWork) return;
+        ensureWorkChip();
+        const { kudos, hits } = readWorkStats();
+        const r = ratioPct(kudos, hits);
+        if (!chip) return;
+        if (r == null) {
+          chip.textContent = 'Kudos/Hit: —';
+          chip.title = 'Missing kudos or hits';
+          chip.className = 'ao3h-khr-chip';
+          return;
+        }
+        chip.textContent = `Kudos/Hit: ${pctText(r)}  (${kudos}/${hits})`;
+        chip.title = 'Kudos divided by Hits';
+        chip.className = `ao3h-khr-chip ${colorClass(r)}`;
+      }
+
+      function teardownWork() {
+        if (chip) { try { chip.remove(); } catch {} chip = null; }
+      }
+
+      /* ---------- List badges + sort ---------- */
+      function statsFromBlurb(li) {
+        const kNode = li.querySelector('.stats .kudos');
+        const hNode = li.querySelector('.stats .hits');
+        const kudos = int(kNode?.textContent);
+        const hits  = int(hNode?.textContent);
+        return { kudos, hits };
+      }
+
+      function ensureBadge(li) {
+        if (!cfg.showOnLists) return;
+        if (li.querySelector('.ao3h-khr-badge')) return;
+
+        const { kudos, hits } = statsFromBlurb(li);
+        const r = ratioPct(kudos, hits);
+        if (r == null) return;
+
+        const where = li.querySelector('.header .heading, h4.heading, h4 a:first-child') || li.querySelector('.header') || li;
+        const badge = document.createElement('span');
+        badge.className = `ao3h-khr-badge ${colorClass(r)}`;
+        badge.title = `Kudos/Hit ratio (${kudos}/${hits})`;
+        badge.textContent = `${pctText(r)} ❤️/👁️`;
+        where.appendChild(badge);
+      }
+
+      function scanList() {
+        if (!(routes.isSearch() || routes.isTagWorks() || routes.isBookmarks())) return;
+        $$('.blurb.work, li.work.blurb.group, .work.blurb.group').forEach(ensureBadge);
+        if (cfg.addSortButton) mountSortButton();
+      }
+
+      function mountSortButton() {
+        const container = $('#main .actions') || $('.actions') || $('.pagination')?.parentElement;
+        if (!container || container._ao3hKhrSort) return;
+        const btn = document.createElement('button');
+        btn.className = 'ao3h-khr-sortbtn';
+        btn.textContent = 'Client-sort by Kudos/Hit';
+        btn.title = 'Sort visible results by kudos/hits ratio (descending)';
+        btn.addEventListener('click', () => sortListByRatio());
+        container.appendChild(btn);
+        container._ao3hKhrSort = true;
+      }
+
+      function sortListByRatio() {
+        const container = $('#main .work.index.group, #works-search .work.index.group') || $('#main');
+        if (!container) return;
+        const items = $$('.blurb.work, li.work.blurb.group, .work.blurb.group', container);
+        const withRatio = items.map(li => {
+          const { kudos, hits } = statsFromBlurb(li);
+          const r = ratioPct(kudos, hits);
+          return { li, r: r ?? -1 };
+        });
+        withRatio.sort((a,b) => b.r - a.r).forEach(({li}) => li.parentNode.appendChild(li));
+      }
+
+      /* ---------- Wire up observers ---------- */
+      function reflow() {
+        if (routes.isWork() || routes.isChapter()) { updateWorkChip(); }
+        if (routes.isSearch() || routes.isTagWorks() || routes.isBookmarks()) { scanList(); }
+      }
+
+      // Initial run
+      reflow();
+
+      // React to DOM/nav changes
+      const mo = observe(document.body, { childList:true, subtree:true }, debounce(reflow, 120));
+      addEventListener('scroll', debounce(() => { if (routes.isWork() || routes.isChapter()) updateWorkChip(); }, 120), { passive:true });
+
+      // Menu hooks (lightweight toggles)
+      try {
+        menu.addToggle?.('Kudos/Hit on work page', cfg.showOnWork, (v)=>{ cfg.showOnWork = !!v; if (!v) teardownWork(); else updateWorkChip(); });
+        menu.addToggle?.('Kudos/Hit on lists', cfg.showOnLists, (v)=>{ cfg.showOnLists = !!v; reflow(); });
+        menu.addToggle?.('Colorize badges', cfg.colorize, (v)=>{ cfg.colorize = !!v; reflow(); });
+        menu.addAction?.('Sort by Kudos/Hit (client)', sortListByRatio);
+        menu.rebuild?.();
+      } catch {}
+
+      // disposer
+      return () => { mo?.disconnect?.(); teardownWork(); };
+    },
+
+    onFlagsUpdated() { /* core handles lifecycle */ }
+  });
+})();
