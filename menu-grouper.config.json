@@ -1,0 +1,23 @@
+{
+  "preferences": {
+    "defaultGroup": null,
+    "unclassifiedBehavior": "leave-as-is",
+    "groupOrder": "manual",
+    "itemOrderDefault": "manual",
+    "rememberOpenState": true,
+    "domOrderMatchesVisual": true
+  },
+  "groups": [
+    {
+      "id": "grp_hide",
+      "title": "-Hide-",
+      "initialOpen": false,
+      "items": [
+        "hideFanficWithNotes.js",
+        "hideByTags.js",
+        "hideDates.js",
+        "hideWordCount.js"
+      ]
+    }
+  ]
+}
