@@ -9,7 +9,7 @@
   const NS   = (AO3H.env && AO3H.env.NS) || 'ao3h';
 
 // How long the top-level menu remains open after the pointer leaves
-const HOVER_CLOSE_DELAY = 250; // ms (tweak to taste)
+const HOVER_CLOSE_DELAY = 280; // ms (tweak to taste)
 
 
   // Local helpers (compatible with your core util)
