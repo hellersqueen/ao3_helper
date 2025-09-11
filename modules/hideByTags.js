@@ -318,7 +318,7 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 
 /* Tag pill */
 .${NS}-ul-tag {
-  display:inline-block; max-width:100%;
+  display:flex; max-width:100%; align-items: center;
   padding:4px 10px; border-radius:999px; background:#f6f7fb; border:1px solid #dfe4f0;
   font-size:10px; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
