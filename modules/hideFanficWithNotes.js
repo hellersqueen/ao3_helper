@@ -1,5 +1,7 @@
 /* modules/hideFanficWithNotes.js — hide works with user notes (IndexedDB + note picker)
-   Live-toggle safe, legacy-safe cleanup, CANCELABLE debounce, and TEMP-SHOW allowlist. */
+   Live-toggle safe, legacy-safe cleanup, CANCELABLE debounce, TEMP-SHOW allowlist,
+   and **proper import/export to IndexedDB** with legacy migration. */
+
 ;(function(){
   'use strict';
 
@@ -57,7 +59,8 @@
   }
   function getAll(){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readonly'); const req=tx.objectStore(STORE).getAll(); req.onsuccess=()=>res(req.result||[]); req.onerror=()=>rej(); }); }
   function getOne(id){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readonly'); const req=tx.objectStore(STORE).get(id); req.onsuccess=()=>res(req.result||null); req.onerror=()=>rej(); }); }
-  function put(rec){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readwrite'); const req=tx.objectStore(STORE).put(rec); req.onsuccess=()=>res(true); req.onerror=()=>rej(); }); }
+  function put(rec){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readwrite'); const req=tx.objectStore(STORE).put(rec); req.onsuccess=()=>res(true); req.onerror=()=>rej(req.error); }); }
+  function bulkPut(recs){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readwrite'); const os=tx.objectStore(STORE); recs.forEach(r=>os.put(r)); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); }); }
 
   /* --------------------------- Quick-note picker -------------------------- */
   const DEFAULT_CHIPS = [
@@ -126,17 +129,18 @@
   function removeHideButtons(){ document.querySelectorAll('.'+NS+'-hide-btn').forEach(b=>b.remove()); }
 
   function getWorkIdFromBlurb(blurb){
-    // Null-safe + type guard
     if (!blurb || typeof blurb.querySelectorAll !== 'function') return null;
     const candidates = blurb.querySelectorAll('.header .heading a, .header a, a[href*="/works/"]');
     for (const a of candidates){
       const href = a.getAttribute('href') || '';
-      if (/\/works\/\d+/.test(href)) return href.replace(/(#.*|\?.*)$/,'');
+      if (/\/works\/\d+/.test(href)) {
+        // normaliser: garder le chemin sans query/fragment
+        return href.replace(/(#.*|\?.*)$/,'').match(/\/works\/\d+/)[0];
+      }
     }
     return null;
   }
 
-  // Mark children we hide so we can restore later
   function hideWork(blurb, reason){
     if (blurb.querySelector('.'+NS+'-hidebar')) return;
     const bar = document.createElement('div');
@@ -167,7 +171,6 @@
       }
     });
   }
-  // legacy-safe reveal (clear any inline display:none even without our marker)
   function forceReveal(blurb){
     blurb.querySelectorAll('.'+NS+'-hidebar').forEach(b=>b.remove());
     Array.from(blurb.children).forEach(c=>{
@@ -178,7 +181,7 @@
   function unhideAllOnPage(){ document.querySelectorAll('li.blurb, .blurb').forEach(forceReveal); }
 
   /* ------------------------------ Data cache ------------------------------ */
-  let hiddenCache = new Map();   // workId -> record
+  let hiddenCache = new Map();   // workId -> record {workId, reason, isHidden}
 
   /* ---------------------- TEMP SHOW allowlist (per-path) ------------------ */
   let tempShow = new Set();
@@ -209,7 +212,7 @@
     return deb;
   }
 
-  let active = false;            // gate to ignore late timers
+  let active = false;
   let mo = null;
   let clickHandler = null;
   let navEvtHandler = null;
@@ -231,17 +234,15 @@
       if (!id) continue;
       const rec = hiddenCache.get(id);
 
-      // if user has temp-shown this work, keep it visible even if DB says hidden
       if (rec?.isHidden) {
         if (tempShow.has(id)) {
-          showWork(blurb);          // ensure bar is gone and content visible
+          showWork(blurb);
           ensureHideButton(blurb);
         } else {
           ensureHideButton(blurb);
           hideWork(blurb, rec.reason || '');
         }
       } else {
-        // DB says visible
         showWork(blurb);
         ensureHideButton(blurb);
       }
@@ -258,79 +259,236 @@
 
   const enhance = makeDebounce(()=>{ if (active) try{ enhanceListOnce(); }catch(e){ console.error('[AO3H][HFN] enhance failed', e); } }, 120);
 
+  /* ----------------------------- Import/Export ---------------------------- */
+  // Legacy storage key (old design that wrote to GM/localStorage)
+  const LEGACY_STORAGE_KEY = `${NS}.hiddenWorks`;
+
+  function safeReadLegacy(){
+    try { if (typeof GM_getValue === 'function') return JSON.parse(GM_getValue(LEGACY_STORAGE_KEY, '[]')); } catch {}
+    try { return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || '[]'); } catch {}
+    return [];
+  }
+  function safeWriteLegacy(val){
+    const json = JSON.stringify(val, null, 2);
+    try { if (typeof GM_setValue === 'function') GM_setValue(LEGACY_STORAGE_KEY, json); } catch {}
+    try { localStorage.setItem(LEGACY_STORAGE_KEY, json); } catch {}
+  }
+
+  // Normalize any legacy entry into { workId: "/works/12345", reason: "note", isHidden: true }
+  function normalizeLegacyEntry(x){
+    if (!x && x !== 0) return null;
+
+    // String could be ID "12345" ou path "/works/12345" ou URL complète
+    if (typeof x === 'string' || typeof x === 'number'){
+      const s = String(x);
+      const m = s.match(/\/works\/\d+/) || s.match(/\d+/);
+      if (!m) return null;
+      const workIdPath = m[0].startsWith('/works/') ? m[0] : ('/works/' + m[0].replace(/^\//,''));
+      return { workId: workIdPath, reason: '', isHidden: true };
+    }
+
+    // Objet moderne
+    if (typeof x === 'object'){
+      // cas {workId: "...", reason, isHidden}
+      if (x.workId){
+        let wid = String(x.workId);
+        const m = wid.match(/\/works\/\d+/) || wid.match(/\d+/);
+        if (!m) return null;
+        wid = m[0].startsWith('/works/') ? m[0] : ('/works/' + m[0]);
+        return { workId: wid, reason: String(x.reason||''), isHidden: (x.isHidden!==false) };
+      }
+      // cas {id: 12345, note:"..."}
+      if (x.id){
+        const m = String(x.id).match(/\d+/);
+        if (!m) return null;
+        return { workId: '/works/' + m[0], reason: String(x.note||x.reason||''), isHidden: (x.hidden!==false) };
+      }
+    }
+    return null;
+  }
+
+  async function exportHiddenWorksIDB(){
+    await openDB();
+    const all = await getAll();
+    // On exporte uniquement les entrées cachées (isHidden=true), avec reason
+    const out = all.filter(r=>r && r.isHidden).map(r=>({ workId: r.workId, reason: r.reason||'', isHidden: true }));
+    const text = JSON.stringify(out, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    a.href = url; a.download = `ao3-hidden-works-${stamp}.json`; a.rel='noopener';
+    (document.body || document.documentElement).appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
+  }
+
+  async function importHiddenWorksIDBFromJSON(jsonValue){
+    await openDB();
+    let incoming;
+    try {
+      incoming = JSON.parse(String(jsonValue||'[]'));
+    } catch (e) {
+      alert('Invalid JSON: ' + e.message);
+      return { added:0, updated:0, total: hiddenCache.size };
+    }
+    if (!Array.isArray(incoming)) incoming = [incoming];
+
+    // Normaliser toutes les entrées
+    const normalized = incoming.map(normalizeLegacyEntry).filter(Boolean);
+    if (!normalized.length){
+      alert('No valid entries found to import.');
+      return { added:0, updated:0, total: hiddenCache.size };
+    }
+
+    // Merge dans l’IDB
+    const toWrite = [];
+    let added=0, updated=0;
+
+    // Charger cache courant pour comparer
+    if (!db) await openDB();
+    if (!hiddenCache.size) await refreshCache();
+
+    for (const rec of normalized){
+      const curr = hiddenCache.get(rec.workId);
+      if (!curr){
+        toWrite.push({ workId: rec.workId, reason: String(rec.reason||''), isHidden: (rec.isHidden!==false) });
+        added++;
+      } else {
+        // Mettre à jour seulement si note/état diffèrent
+        const wantHidden = (rec.isHidden!==false);
+        const wantReason = String(rec.reason||'');
+        if (curr.isHidden !== wantHidden || (wantReason && wantReason !== (curr.reason||''))){
+          toWrite.push({ workId: rec.workId, reason: wantReason, isHidden: wantHidden });
+          updated++;
+        }
+      }
+    }
+
+    if (toWrite.length){
+      await bulkPut(toWrite);
+      await refreshCache();
+      applyStoredHides();
+    }
+
+    return { added, updated, total: hiddenCache.size };
+  }
+
+  // Public page-level helpers for menu dialogs (now bound to IDB)
+  function openFilePickerAndImport(){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.style.display = 'none';
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const { added, updated, total } = await importHiddenWorksIDBFromJSON(reader.result);
+        alert(`Imported: +${added} added, ${updated} updated. Total hidden in DB: ${total}.`);
+        input.remove();
+      };
+      reader.readAsText(file);
+    }, { once:true });
+    (document.body || document.documentElement).appendChild(input);
+    input.click();
+  }
+
+  // Expose to PAGE for the menu dialog (overwrites previous localStorage-based versions)
+  W.ao3hExportHiddenWorks = exportHiddenWorksIDB;
+  W.ao3hImportHiddenWorks = openFilePickerAndImport;
+
+  // Optional: manual refresh hook
+  W.ao3hRefreshHiddenWorks = async function(){
+    await refreshCache();
+    applyStoredHides();
+  };
+
+  // One-time legacy migration (if old key exists with data)
+  async function migrateLegacyOnce(){
+    let legacy = safeReadLegacy();
+    if (!legacy || (Array.isArray(legacy) && legacy.length===0)) return;
+    const before = Array.isArray(legacy) ? legacy.length : 1;
+    const { added, updated } = await importHiddenWorksIDBFromJSON(legacy);
+    // On peut vider la clé legacy si migration utile
+    if (added || updated) {
+      try { safeWriteLegacy([]); } catch {}
+      console.info(`[AO3H][HFN] Migrated ${before} legacy entries -> IDB (+${added} / upd ${updated}).`);
+    }
+  }
+
   /* ------------------------------- Lifecycle ------------------------------ */
   async function start(){
     active = true;
 
-    // restore temp-show allowlist for this path
+    // restaurer temp-show
     tempShow = loadTempShow();
 
+    await openDB();
+    await migrateLegacyOnce(); // migration silencieuse
     await refreshCache();
     enhanceListOnce();
 
-    // SINGLE, hardened, guarded click handler
+    // SINGLE guarded click handler
     clickHandler = guarded(async (e)=>{
-// ---- Hide button on blurb header ----
-const hideBtn = e.target?.closest?.('.' + NS + '-hide-btn');
-if (hideBtn){
-  const blurb = hideBtn.closest('li.blurb') || hideBtn.closest('.blurb') || hideBtn.closest('li');
-  const id = getWorkIdFromBlurb(blurb);
-  if (!blurb || !id) return;
+      // ---- Hide button on blurb header ----
+      const hideBtn = e.target?.closest?.('.' + NS + '-hide-btn');
+      if (hideBtn){
+        const blurb = hideBtn.closest('li.blurb') || hideBtn.closest('.blurb') || hideBtn.closest('li');
+        const id = getWorkIdFromBlurb(blurb);
+        if (!blurb || !id) return;
 
-  try{
-    const existing = hiddenCache.get(id);
+        try{
+          const existing = hiddenCache.get(id);
 
-    // 1) If it was temp-shown (or visible but marked hidden), re-hide with existing note — no picker.
-    const wasTempShown = existing?.isHidden && tempShow.has(id);
-    const isVisibleButShouldBeHidden = existing?.isHidden && !blurb.querySelector('.' + NS + '-hidebar');
-    if (wasTempShown || isVisibleButShouldBeHidden){
-      tempShow.delete(id); saveTempShow();
-      const reason = existing?.reason || '';
-      hideWork(blurb, reason);
-      await put({ workId:id, reason:String(reason), isHidden:true });
-      hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
-      return;
-    }
+          // 1) If it was temp-shown (or visible but marked hidden), re-hide with existing note — no picker.
+          const wasTempShown = existing?.isHidden && tempShow.has(id);
+          const isVisibleButShouldBeHidden = existing?.isHidden && !blurb.querySelector('.' + NS + '-hidebar');
+          if (wasTempShown || isVisibleButShouldBeHidden){
+            tempShow.delete(id); saveTempShow();
+            const reason = existing?.reason || '';
+            hideWork(blurb, reason);
+            await put({ workId:id, reason:String(reason), isHidden:true });
+            hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
+            return;
+          }
 
-    // 2) Quick toggle — any modifier key skips the picker.
-    const quick = e.shiftKey || e.altKey || e.ctrlKey || e.metaKey;
-    if (quick){
-      tempShow.delete(id); saveTempShow();
-      const reason = existing?.reason || '';
-      hideWork(blurb, reason);
-      await put({ workId:id, reason:String(reason), isHidden:true });
-      hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
-      return;
-    }
+          // 2) Quick toggle — any modifier key skips the picker.
+          const quick = e.shiftKey || e.altKey || e.ctrlKey || e.metaKey;
+          if (quick){
+            tempShow.delete(id); saveTempShow();
+            const reason = existing?.reason || '';
+            hideWork(blurb, reason);
+            await put({ workId:id, reason:String(reason), isHidden:true });
+            hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
+            return;
+          }
 
-    // 3) Default: open the picker (new hide or you want to edit the note).
-    const picked = await pickReason(existing?.reason || '');
-    if (picked == null) return;
-    if (!blurb.isConnected) return; // re-check after await
+          // 3) Default: open the picker (new hide or edit note).
+          const picked = await pickReason(existing?.reason || '');
+          if (picked == null) return;
+          if (!blurb.isConnected) return; // re-check after await
 
-    tempShow.delete(id); saveTempShow();
-    hideWork(blurb, picked);
-    await put({ workId:id, reason:String(picked), isHidden:true });
-    hiddenCache.set(id, { workId:id, reason:String(picked), isHidden:true });
-  }catch(err){
-    console.error('[AO3H][HFN] hide click failed', err);
-  }
-  return;
-}
-
-
+          tempShow.delete(id); saveTempShow();
+          hideWork(blurb, picked);
+          await put({ workId:id, reason:String(picked), isHidden:true });
+          hiddenCache.set(id, { workId:id, reason:String(picked), isHidden:true });
+        }catch(err){
+          console.error('[AO3H][HFN] hide click failed', err);
+        }
+        return;
+      }
 
       // ---- Actions inside the hide bar ----
       const bar = e.target?.closest?.('.' + NS + '-hidebar');
       if (!bar) return;
 
-      // Resolve blurb + id *now*, before any async
       const blurb = bar.closest('li.blurb') || bar.closest('.blurb') || bar.closest('li');
       const id = getWorkIdFromBlurb(blurb);
       if (!blurb || !id) return;
 
       if (e.target.classList.contains('show')){
-        // Temporary reveal: DB unchanged, but remember exemption
         showWork(blurb);
         tempShow.add(id); saveTempShow();
         return;
@@ -338,10 +496,10 @@ if (hideBtn){
 
       if (e.target.classList.contains('unhide')){
         if (!confirm('Unhide this work permanently? (Note will be kept)')) return;
-        if (!blurb.isConnected) return; // safeguard
+        if (!blurb.isConnected) return;
 
         showWork(blurb);
-        tempShow.delete(id); saveTempShow();   // no exemption needed anymore
+        tempShow.delete(id); saveTempShow();
         const rec = hiddenCache.get(id);
         const reason = rec?.reason || bar.querySelector('.reason')?.textContent || '';
         await put({ workId:id, reason:String(reason), isHidden:false });
@@ -354,7 +512,6 @@ if (hideBtn){
         const next = await pickReason(current);
         if (next == null) return;
 
-        // after await, make sure blurb/bar still exist
         if (!blurb.isConnected) return;
         const barNow = blurb.querySelector('.' + NS + '-hidebar');
         if (!barNow) return;
@@ -362,16 +519,13 @@ if (hideBtn){
         barNow.querySelector('.reason').textContent = String(next);
         await put({ workId:id, reason:String(next), isHidden:true });
         hiddenCache.set(id, { workId:id, reason:String(next), isHidden:true });
-        // keep tempShow as-is (if they temporarily showed earlier, keep it visible)
         return;
       }
     });
 
-    // ATTACH IT
     document.addEventListener('click', clickHandler, false);
 
-    mo = observe(document.body, ()=> enhance()); // schedule only; enhance checks 'active'
-
+    mo = observe(document.body, ()=> enhance());
     navEvtHandler = guarded(()=> enhance());
     document.addEventListener(`${NS}:navigated`, navEvtHandler);
     if (AO3H.bus?.on){
@@ -398,97 +552,10 @@ if (hideBtn){
 
     try { enhance.cancel?.(); } catch {}
 
-    // Clear temp-show list when turning the module off (so re-enable respects DB)
     clearTempShow();
-
-    // HARD RESET visuals (legacy-safe)
     unhideAllOnPage();
     removeHideButtons();
   }
-
-  /* ===== Hidden works Import/Export hooks — place before AO3H.modules.register(...) ===== */
-(() => {
-  const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-
-  // Don’t redefine if already present
-  if (typeof W.ao3hExportHiddenWorks === 'function' || typeof W.ao3hImportHiddenWorks === 'function') return;
-
-  const NS = (W.AO3H && W.AO3H.env && W.AO3H.env.NS) || 'ao3h';
-  const STORAGE_KEY = `${NS}.hiddenWorks`;
-
-  // Read/write helpers — GM_* if available, else localStorage
-  const readHidden = () => {
-    try { if (typeof GM_getValue === 'function') return JSON.parse(GM_getValue(STORAGE_KEY, '[]')); } catch {}
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch {}
-    return [];
-  };
-  const writeHidden = (val) => {
-    const json = JSON.stringify(val, null, 2);
-    try { if (typeof GM_setValue === 'function') GM_setValue(STORAGE_KEY, json); } catch {}
-    try { (document.body || document.documentElement) && localStorage.setItem(STORAGE_KEY, json); } catch {}
-  };
-
-  const downloadJSON = (filename, text) => {
-    const blob = new Blob([text], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.rel = 'noopener';
-    (document.body || document.documentElement).appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
-  };
-
-  function exportHiddenWorks() {
-    const data = readHidden();
-    const stamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
-    downloadJSON(`ao3-hidden-works-${stamp}.json`, JSON.stringify(data, null, 2));
-  }
-
-  function importHiddenWorks() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/json,.json';
-    input.style.display = 'none';
-    input.addEventListener('change', () => {
-      const file = input.files && input.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const incoming = JSON.parse(String(reader.result || '[]'));
-          const current  = readHidden();
-          let next;
-          if (Array.isArray(current) && Array.isArray(incoming)) {
-            const keyOf = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v) : JSON.stringify(v);
-            const seen = new Set(current.map(keyOf));
-            next = current.slice();
-            for (const item of incoming) {
-              const k = keyOf(item);
-              if (!seen.has(k)) { seen.add(k); next.push(item); }
-            }
-            alert(`Imported ${next.length - current.length} new item(s). Total: ${next.length}.`);
-          } else {
-            next = incoming;
-            alert('Imported list (overwrote previous value).');
-          }
-          writeHidden(next);
-          try { document.dispatchEvent(new CustomEvent(`${NS}:hidden-works-updated`, { detail:{ count: next?.length || 0 } })); } catch {}
-        } catch (e) {
-          alert('Invalid JSON: ' + e.message);
-        } finally {
-          input.remove();
-        }
-      };
-      reader.readAsText(file);
-    }, { once:true });
-    (document.body || document.documentElement).appendChild(input);
-    input.click();
-  }
-
-  // Expose to PAGE for the menu dialog
-  W.ao3hExportHiddenWorks = exportHiddenWorks;
-  W.ao3hImportHiddenWorks = importHiddenWorks;
-})();
 
   /* --------------------------- Module registration ------------------------ */
   function register(){
@@ -507,7 +574,6 @@ if (hideBtn){
       });
     }
 
-    // Safety net: react if flags flip directly
     try {
       AO3H.flags?.watch?.(FLAG_CAN, v => { v ? onReady(start) : stop(); });
       if (FLAG_ALT !== FLAG_CAN) AO3H.flags?.watch?.(FLAG_ALT, v => { v ? onReady(start) : stop(); });
