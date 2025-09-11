@@ -1,9 +1,4 @@
 /* == AO3H Module: ProgressBar ============================================= */
-/* Vertical thermometer progress — LEFT side, compact height/width.          */
-/* Label ABOVE the tube; no bulb; no ETA; fic marker off by default.         */
-/* Progress is bounded: first chapter .userstuff → last ul.actions below it. */
-/* Click the % label to hide/show the bar.                                   */
-/* Menu: only the on/off toggle via AO3H core (no per-module actions).       */
 
 (function () {
   'use strict';
@@ -11,11 +6,14 @@
   const AO3H = W.AO3H;
   if (!AO3H || !AO3H.modules) return;
 
-  const { util, routes, store } = AO3H;
+  // ⬇️ include optional flags/bus/env if present
+  const { util, routes, store, flags = {}, bus = {}, env = {} } = AO3H;
   const { css, observe, debounce, onReady } = util;
 
   AO3H.modules.register('ProgressBar', { title: 'Reading Progress', enabledByDefault: false }, function init () {
     const KV = 'ProgressBar:v15-left-compact-bounded-toplabel';
+    const ENABLE_KEY = 'mod:ProgressBar:enabled'; // core toggle flag name
+
     const defaults = {
       rememberChapterPercent: true,
       showFicMarker: false,   // hidden by default
@@ -32,7 +30,11 @@
 
     // runtime state
     let ui = null, raf = 0, lastScrollY = -1, mo = null;
-    const onResize = debounce(() => { measureBounds(); tick(true); }, 150);
+    let active = false;                 // NEW: whether UI is mounted
+    let unwatch = null, offBus = null;  // optional watchers
+    let poll = null;                    // fallback poller
+
+    const onResize = debounce(() => { if (!active) return; measureBounds(); tick(true); }, 150);
 
     let state = { workId:null, chapterId:null, chapterIndex:1, chapterTotal:1 };
 
@@ -227,32 +229,31 @@
         /* Label ABOVE (so bar appears under the percentage) */
         .ao3h-thermo .label {
           position: absolute; bottom: 100%; left: 90%;
-           transform: translate(-50%, -6px);  /* push inwards & up */
+          transform: translate(-50%, -6px);  /* push inwards & up */
           font: 10px/1 system-ui, sans-serif;
           color: #fff; background: rgba(0,0,0,.55);
           padding: 2px 6px; border-radius: 8px; pointer-events: auto; white-space: nowrap;
           user-select: none; cursor: pointer;
         }
-    /* Default = collapsed (dot is grey) */
-.ao3h-thermo .label::after {
-  content: "";
-  display: inline-block;
-  width: 6px; height: 6px;
-  margin-left: 4px;
-  border-radius: 50%;
-  background: #6b7280;            /* grey */
-  box-shadow: 0 0 4px #6b7280;
-}
 
-/* When expanded (progress bar visible) */
-.ao3h-thermo:not(.collapsed) .label::after {
-  background: #10b981;            /* green */
-  box-shadow: 0 0 4px #10b981;
-}
+        /* Default = collapsed (dot is grey) */
+        .ao3h-thermo .label::after {
+          content: "";
+          display: inline-block;
+          width: 6px; height: 6px;
+          margin-left: 4px;
+          border-radius: 50%;
+          background: #6b7280;            /* grey */
+          box-shadow: 0 0 4px #6b7280;
+        }
 
-          .ao3h-thermo.collapsed:after {
-  content: none !important;
-}
+        /* When expanded (progress bar visible) */
+        .ao3h-thermo:not(.collapsed) .label::after {
+          background: #10b981;            /* green */
+          box-shadow: 0 0 4px #10b981;
+        }
+
+        .ao3h-thermo.collapsed:after { content: none !important; }
 
         @media (prefers-color-scheme: light) {
           .ao3h-thermo .label { color:#111; background:rgba(255,255,255,.7); }
@@ -298,7 +299,18 @@
       });
     }
 
-    function destroyUI() { if (ui) { try { ui.remove(); } catch {} ui = null; } }
+    function destroyUI() { if (ui) { try { ui.remove(); } catch {} ui = null; }
+
+    }
+
+    /* Quick teardown that also stops listeners/observer */
+    function teardown() {
+      active = false;
+      try { removeEventListener('scroll', onScroll, { passive: true }); } catch {}
+      try { removeEventListener('resize', onResize); } catch {}
+      try { mo && mo.disconnect && mo.disconnect(); } catch {}
+      destroyUI();
+    }
 
     /* ---------- state save/restore ---------- */
 
@@ -369,28 +381,66 @@
     }
 
     function bootIfEligible() {
-      if (!(routes.isWork() || routes.isChapter())) { destroyUI(); return; }
+      if (!(routes.isWork() || routes.isChapter())) { teardown(); return; }
       parseWorkIds(); getChapterStats(); ensureUI(); measureBounds(); tick(true); maybeRestorePosition();
+      active = true;
     }
 
     const onMutate = debounce(() => {
+      if (!active) return;
       if (routes.isWork() || routes.isChapter()) { ensureUI(); getChapterStats(); measureBounds(); tick(true); }
-      else { destroyUI(); }
+      else { teardown(); }
     }, 150);
 
-    mo = observe(onMutate);
-    addEventListener('scroll', onScroll, { passive: true });
-    addEventListener('resize', onResize);
+    // start observers/listeners only when active
+    function startListeners() {
+      mo = observe(onMutate);
+      addEventListener('scroll', onScroll, { passive: true });
+      addEventListener('resize', onResize);
+    }
 
     // initial
     bootIfEligible();
+    startListeners();
+
+    /* === NEW: react instantly to the module toggle === */
+    const readEnabled = () => {
+      // Prefer AO3H.flags if available, else fallback to stored value (default true)
+      try {
+        if (flags && typeof flags.get === 'function') return !!flags.get(ENABLE_KEY);
+      } catch {}
+      return !!store.lsGet(ENABLE_KEY, true);
+    };
+
+    const handleFlagChange = () => {
+      const enabled = readEnabled();
+      if (!enabled && active) {
+        teardown();
+      } else if (enabled && !active) {
+        bootIfEligible();
+        startListeners();
+      }
+    };
+
+    // Use flags.watch if the core provides it; else try a bus event; else poll
+    if (flags && typeof flags.watch === 'function') {
+      unwatch = flags.watch(ENABLE_KEY, handleFlagChange);
+    } else if (bus && typeof bus.on === 'function') {
+      const evt = (env && env.NS) ? `${env.NS}:flags-updated` : 'ao3h:flags-updated';
+      const cb = () => handleFlagChange();
+      bus.on(evt, cb);
+      offBus = () => { try { bus.off && bus.off(evt, cb); } catch {} };
+    } else {
+      // Fallback: very light polling (400ms)
+      poll = setInterval(handleFlagChange, 400);
+    }
 
     // disposer
     return () => {
-      try { removeEventListener('scroll', onScroll, { passive: true }); } catch {}
-      try { removeEventListener('resize', onResize); } catch {}
-      try { mo && mo.disconnect && mo.disconnect(); } catch {}
-      destroyUI();
+      try { unwatch && unwatch(); } catch {}
+      try { offBus && offBus(); } catch {}
+      try { poll && clearInterval(poll); } catch {}
+      teardown();
     };
   });
 })();
