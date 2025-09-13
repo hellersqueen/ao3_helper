@@ -4,7 +4,7 @@
   'use strict';
 
   // --- AO3H bindings / utils ---
-// --- AO3H bindings / utils ---
+  // --- AO3H bindings / utils ---
   const AO3H = window.AO3H || {};
   const { $, $$, onReady, observe, css, debounce } = AO3H.util || {};
   const Storage = AO3H.store;
@@ -161,204 +161,476 @@
   align-items: center;
   gap: .5rem;
   justify-content: flex-start;
-  width: 98%;
   min-height: 14px;
-  padding: .65rem .8rem;
+  padding: 12px 10px;
   border: 1px dashed #bdbdbd;
   border-radius: 8px;
   background: #fee9e9;
-  font-size: .75rem;
+  font-size: 11px;
   color: #333;
   cursor: pointer;
   user-select: none;
   touch-action: manipulation;
 }
+
 .${NS}-fold.${NS}-disabled {
 cursor: default;
 background: #f7f7f7;
 border-style: solid;
 }
-.${NS}-fold.${NS}-disabled:hover { background: #f7f7f7; }
-.${NS}-fold.${NS}-disabled .${NS}-hint { opacity:.55; }
 
-.${NS}-fold * { pointer-events: none; }
-.${NS}-fold:hover { background:#f1f3f7; }
-.${NS}-fold:focus { outline:2px solid #7aa7ff; outline-offset:2px; }
-.${NS}-note { font-weight:600; }
-.${NS}-reason { margin-left:4px; opacity:.85; }
-.${NS}-hint { margin-left:auto; font-size:.85em; opacity:.7; }
-.${NS}-cut { display:none; }
-.${NS}-fold[aria-expanded="true"] + .${NS}-cut { display:block; }
-.${NS}-fold[aria-expanded="true"] {
-  position: sticky; top: 0; z-index: 100;
-  margin-top: 0; margin-bottom: 8px;
-  padding: .35rem .6rem;
-  background:#fffbe6; border:1px solid #e6d28a; border-bottom:1px dashed #bdbdbd;
-  border-radius:8px; opacity:.95;
+.${NS}-fold.${NS}-disabled:hover { 
+background: #f7f7f7; 
 }
-.${NS}-force-show { display:list-item !important; }
+
+.${NS}-fold.${NS}-disabled .${NS}-hint { 
+opacity:.55; 
+}
+
+.${NS}-fold * { 
+pointer-events: none; 
+}
+
+.${NS}-fold:hover { 
+background:#f1f3f7; 
+}
+
+.${NS}-fold:focus { 
+outline:2px solid #7aa7ff; 
+outline-offset:2px; 
+}
+
+.${NS}-note { 
+font-weight:600; 
+}
+
+.${NS}-reason { 
+margin-left:4px; 
+opacity:.85; 
+}
+
+.${NS}-hint { 
+margin-left:auto; 
+font-size:.85em; 
+opacity:.7; 
+}
+
+.${NS}-cut { 
+display:none; 
+}
+
+.${NS}-fold[aria-expanded="true"] + .${NS}-cut { 
+display:block; 
+}
+
+.${NS}-fold[aria-expanded="true"] {
+  position: sticky; 
+  top: 0; 
+  z-index: 100;
+  margin-top: 0; 
+  margin-bottom: 8px;
+  padding: .35rem .6rem;
+  background:#fffbe6; 
+  border:1px solid #e6d28a; 
+  border-bottom:1px dashed #bdbdbd;
+  border-radius:8px; 
+  opacity:.95;
+}
+
+.${NS}-force-show { 
+display:list-item !important; 
+}
 
 /* ===================== INLINE HIDE ICON ===================== */
-a.tag.${NS}-tag-wrap{
+a.tag.${NS}-tag-wrap {
   position: relative;
   padding-right: 0;
   overflow: visible;
   transition: padding-right .12s;
 }
+
 a.tag.${NS}-tag-wrap:hover,
 a.tag.${NS}-tag-wrap:focus-visible,
 ul.commas li:hover > a.tag.${NS}-tag-wrap,
 ol.commas li:hover > a.tag.${NS}-tag-wrap,
-.commas   li:hover > a.tag.${NS}-tag-wrap{
+.commas   li:hover > a.tag.${NS}-tag-wrap {
   padding-right: 0.8em;
 }
-.${NS}-hide-ico{
+
+.${NS}-hide-ico {
   position: absolute;
   right: -0.1em;
   top: 50%;
   transform: translateY(-50%);
-  width: 1em; height: 1em; line-height: 1em;
-  text-align: center; font-size: .9em;
-  border: none; border-radius: 50%;
+  width: 1em; 
+  height: 1em; 
+  line-height: 1em;
+  text-align: center; 
+  font-size: .9em;
+  border: none; 
+  border-radius: 50%;
   background: transparent;
-  opacity: 0; pointer-events: none;
+  opacity: 0; 
+  pointer-events: none;
   transition: opacity .15s, transform .15s;
   z-index: 2;
 }
+
 /* Hide our injected comma only when the icon would be visible */
 a.tag.${NS}-tag-wrap:hover .${NS}-tag-comma,
 a.tag.${NS}-tag-wrap:focus-visible .${NS}-tag-comma,
 ul.commas li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma,
 ol.commas li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma,
-.commas   li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma{
+.commas   li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma {
   display: none;
 }
+
 a.tag.${NS}-tag-wrap:hover .${NS}-hide-ico,
-a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
-  opacity: 1; pointer-events: auto;
+a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico {
+  opacity: 1; 
+  pointer-events: auto;
 }
-.${NS}-hide-ico:hover{
+
+.${NS}-hide-ico:hover {
   transform: translateY(-50%) scale(1.06);
 }
+
 ul.commas li,
 ol.commas li,
-.commas li{ white-space: nowrap; }
+.commas li { 
+white-space: nowrap; 
+}
+
 ul.commas li > a.tag.${NS}-tag-wrap,
 ol.commas li > a.tag.${NS}-tag-wrap,
-.commas   li > a.tag.${NS}-tag-wrap{
-  font-size: 0.92em; line-height: 1.15;
+.commas   li > a.tag.${NS}-tag-wrap {
+  font-size: 0.92em; 
+  line-height: 1.15;
 }
+
 ul.commas li::after,
 ol.commas li::after,
-.commas   li::after{ font-size: 0.92em; }
-a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
+.commas   li::after { 
+font-size: 0.92em; 
+}
+
+a.tag.${NS}-tag-wrap .${NS}-hide-ico { 
+font-size: 0.9em; 
+}
 
 /* ===================== MANAGER PANEL (ULTRA-LIGHT) ===================== */
-.${NS}-mgr-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999998; }
+.${NS}-mgr-backdrop { 
+position:fixed; 
+inset:0; 
+background:rgba(0,0,0,.35); 
+z-index:999998; 
+}
+
 .${NS}-mgr {
-  position:fixed; top:10vh; left:50%; transform:translateX(-50%);
-  background:#fff; color:#000; border:1px solid #e5e7eb; padding:10px;
-  z-index:999999; box-shadow:0 16px 40px rgba(2,15,35,.12);
+  position:fixed; 
+  top:10vh; 
+  left:50%; 
+  transform:translateX(-50%);
+  background:#fff; 
+  color:#000; 
+  border:1px solid #e5e7eb; 
+  padding:10px;
+  z-index:999999; 
+  box-shadow:0 16px 40px rgba(2,15,35,.12);
   font: 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-  display:grid; gap:8px; max-height: 60vh; max-width: 70vh; overflow: auto;
+  display:grid; 
+  gap:8px; 
+  max-height: 60vh; 
+  max-width: 70vh; 
+  overflow: auto;
 }
-.${NS}-mgr h3 { margin:.2rem 0 .4rem; font-size:1rem; text-align:center; }
 
-.${NS}-ul-head { display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
+.${NS}-close-x{
+  position:absolute;
+  top:2px;
+  right:4px;
+  width:16px;
+  height:16px;
+  padding-bottom: 6px;
+  border:none;
+  border-radius:6px;
+  background:transparent;
+  font-size:10px;
+  line-height:16px;
+  text-align:center;
+  cursor:pointer;
+}
+.${NS}-close-x:hover{
+  background:#f5f7fb;
+  border-color:#cfd6e4;
+}
+
+.${NS}-mgr h3 { 
+margin:.2rem 0 .4rem; 
+font-size:1rem; 
+text-align:center; 
+}
+
+.${NS}-ul-head { 
+display:grid; 
+grid-template-columns: 1fr auto; 
+gap:6px; 
+align-items:center; 
+}
+
 .${NS}-ul-search {
-  border-radius: 8px; border:1px solid #cfd6e4; background:#fff;
-  padding: 6px 10px; font-size:10px;
+  border-radius: 8px; 
+  border:1px solid #cfd6e4; 
+  background:#fff;
+  padding: 6px 10px; 
+  font-size:10px;
 }
-.${NS}-ul-count { font-weight:600; font-size:10px; color:#4b5563; }
 
-.${NS}-ul-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.${NS}-ul-count { 
+font-weight:600; 
+font-size:10px; 
+color:#4b5563; 
+}
+
+.${NS}-ul-actions { 
+display:flex; 
+gap:8px; 
+flex-wrap:wrap; 
+}
+
 .${NS}-ul-btn {
-  height: 25px; padding: 0 10px;
-  border-radius: 8px; border:1px solid #cfd6e4; background:#f5f7fb;
-  font-size:10px; cursor:pointer; transition: background .15s, transform .12s, border-color .15s;
+  height: 25px; 
+  padding: 0 10px;
+  border-radius: 8px; 
+  border:1px solid #cfd6e4; 
+  background:#f5f7fb;
+  font-size:10px; 
+  cursor:pointer; 
+  transition: background .15s, transform .12s, border-color .15s;
 }
-.${NS}-ul-btn:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
 
-.${NS}-ul-list { display:grid; gap:8px; max-height:none; overflow:visible; padding-right:2px; }
+.${NS}-ul-btn:hover { 
+background:#ecf1f8; 
+border-color:#b8c3d8; 
+transform: translateY(-1px); 
+}
+
+.${NS}-ul-list { 
+display:grid; 
+gap:8px; 
+max-height:none; 
+overflow:visible; 
+padding-right:2px; 
+}
 
 .${NS}-ul-group {
-  border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px;
-  display: flex; flex-direction: column; min-height: 25px;
+  border: 1px solid #e6e8ee; 
+  background: #fff; 
+  border-radius: 10px; 
+  margin-bottom: 8px;
+  display: flex; 
+  flex-direction: column; 
+  min-height: 25px;
 }
+
 .${NS}-ul-ghead {
-  display:flex; align-items:center; gap:8px; height:25px; padding:3px;
+  display:flex; 
+  align-items:center; 
+  gap:8px; 
+  height:25px; 
+  padding:3px;
   background:transparent; border:none; cursor:pointer; user-select:none;
 }
-.${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
 
-.${NS}-ul-chevron { display:inline-block; width:10px; min-width:10px; height:10px; transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px; }
-.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(90deg); }
+.${NS}-ul-ghead:focus-visible { 
+outline: 2px solid #7aa7ff; 
+outline-offset: 2px; 
+}
+
+.${NS}-ul-chevron { 
+display:inline-block; 
+width:10px; 
+min-width:10px; 
+height:10px; 
+transform-origin:50% 50%; 
+transition: transform .18s ease; margin-left:10px; 
+}
+
+.${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { 
+transform: rotate(90deg); 
+}
 
 .${NS}-ul-glabel {
-  font-weight:650; font-size:10px; color:#1f2937; line-height:25px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:-8px; margin-left:-15px;
+  font-weight:650; 
+  font-size:12px; 
+  color:#1f2937; 
+  line-height:25px;
+  white-space:nowrap; 
+  overflow:hidden; 
+  text-overflow:ellipsis; 
+  margin-left:-15px;
 }
 
 .${NS}-ul-gwrap {
-  overflow:hidden; max-height:0;
+  overflow:hidden; 
+  max-height:0;
   transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease;
 }
+
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-gwrap {
-  max-height:1200px; border-top: 1px dashed #e7ebf5;
+  max-height:1200px; 
+  border-top: 1px dashed #e7ebf5;
 }
 
-.${NS}-ul-gwrap { display:grid; gap:6px; }
+.${NS}-ul-gwrap { 
+display:grid; 
+gap:6px; 
+}
+
 .${NS}-ul-row {
-  display:grid; grid-template-columns: 1fr auto auto; gap:8px;
-  padding:3px 4px; border:1px dashed transparent; border-radius:8px;
+  display:grid; 
+  grid-template-columns: 1fr auto auto; 
+  align-items:center; 
+  gap:8px;
+  padding:6px 8px; 
+  border:1px dashed transparent; 
+  border-radius:8px;
   transition: background .12s, border-color .12s;
 }
-.${NS}-ul-row:hover { background:#fafbfe; border-color:#e7ebf5; }
+
+.${NS}-ul-row:hover { 
+background:#fafbfe; 
+border-color:#e7ebf5; 
+}
 
 .${NS}-ul-tag {
-  display:inline-block; max-width:100%;
-  padding:4px 10px; border-radius:999px; background:#f6f7fb; border:1px solid #dfe4f0;
-  font-size:10px; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  display:inline-block; 
+  max-width:100%;
+  padding:4px 10px; 
+  border-radius:999px; 
+  background:#f6f7fb; 
+  border:1px solid #dfe4f0;
+  font-size:11px; 
+  font-weight:500; 
+  color:#111827; 
+  white-space:nowrap; 
+  overflow:hidden; 
+  text-overflow:ellipsis;
 }
 
 .${NS}-ul-gbtn, .${NS}-ul-del {
-  display:flex; align-items:center; justify-content:center;
-  height:26px; min-width:30px; padding:0 10px;
-  border:1px solid #cfd6e4; border-radius:8px; background:#f5f7fb; font-size:10px; cursor:pointer;
+  display:flex; 
+  align-items:center; 
+  justify-content:center;
+  height:26px; 
+  min-width:30px; 
+  padding:0 10px;
+  border:1px solid #cfd6e4; 
+  border-radius:8px; 
+  background:#f5f7fb; 
+  font-size:10px; 
+  cursor:pointer;
   transition: background .15s, transform .12s, border-color .15s;
 }
-.${NS}-ul-gbtn:hover, .${NS}-ul-del:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
-.${NS}-ul-del { background:#fff6f6; border-color:#f2c9c9; }
-.${NS}-ul-del:hover { background:#ffecec; border-color:#e9b3b3; }
+
+.${NS}-ul-gbtn:hover, .${NS}-ul-del:hover { 
+background:#ecf1f8; 
+border-color:#b8c3d8; 
+transform: translateY(-1px); 
+}
+
+.${NS}-ul-del { 
+background:#fff6f6; 
+border-color:#f2c9c9; 
+}
+
+.${NS}-ul-del:hover { 
+background:#ffecec; 
+border-color:#e9b3b3; 
+}
 
 .${NS}-toast {
-  position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,.75); color: #fff;
-  padding: 6px 10px; border-radius: 10px;
-  font-size:11px; z-index: 999999;
-  opacity: 0; transition: opacity .15s ease; pointer-events: none;
+  position: fixed; 
+  bottom: 10px; 
+  left: 50%; 
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.75); 
+  color: #fff;
+  padding: 6px 10px; 
+  border-radius: 10px;
+  font-size:11px; 
+  z-index: 999999;
+  opacity: 0; 
+  transition: opacity .15s ease; 
+  pointer-events: none;
 }
 
 .${NS}-gp-pop {
-  position: absolute; z-index: 1000000;
-  min-width: 180px; max-width: 260px; max-height: 50vh; overflow: auto;
-  background: #fff; border: 1px solid #bbb; border-radius: 8px;
-  box-shadow: 0 6px 16px rgba(0,0,0,.2); padding: 6px;
+  position: absolute; 
+  z-index: 1000000;
+  min-width: 180px; 
+  max-width: 260px; 
+  max-height: 50vh; 
+  overflow: auto;
+  background: #fff; 
+  border: 1px solid #bbb; 
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.2); 
+  padding: 6px;
   font: 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
 }
-.${NS}-gp-head { font-weight: 600; margin-bottom: 4px; text-align:center; }
-.${NS}-gp-list { display: grid; gap: 4px; }
+
+.${NS}-gp-head { 
+font-weight: 600; 
+margin-bottom: 4px; 
+text-align:center; 
+}
+
+.${NS}-gp-list { 
+display: grid; 
+gap: 4px; 
+}
+
 .${NS}-gp-item {
-  display: flex; justify-content: space-between;
-  padding: 4px 6px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer;
+  display: flex; 
+  justify-content: space-between;
+  padding: 4px 6px; 
+  border: 1px solid #ddd; 
+  border-radius: 6px; 
+  cursor: pointer;
 }
-.${NS}-gp-item:hover { background: #f4f6f9; }
-.${NS}-gp-input { width: 90%; margin-top: 6px; padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px;}
-.${NS}-gp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+
+.${NS}-gp-item:hover { 
+background: #f4f6f9; 
+}
+
+.${NS}-gp-input { 
+width: 90%; 
+margin-top: 6px; 
+padding: 6px 8px; 
+border: 1px solid #bbb; 
+border-radius: 6px;
+}
+
+.${NS}-gp-actions { 
+display: flex; 
+gap: 6px; 
+justify-content: flex-end; 
+margin-top: 6px; 
+}
+
 .${NS}-gp-btn {
-  padding: 3px 6px; border: 1px solid #bbb; border-radius: 6px; background: #f3f4f6; cursor: pointer; font-size: 11px;
+  padding: 3px 6px; 
+  border: 1px solid #bbb; 
+  border-radius: 6px; 
+  background: #f3f4f6; 
+  cursor: pointer; 
+  font-size: 11px;
 }
-.${NS}-gp-btn:hover { background:#e9ecf0; }
+
+.${NS}-gp-btn:hover { 
+background:#e9ecf0; 
+}
 
 @media (max-width: 720px){
   .${NS}-ul-head { grid-template-columns: 1fr; }
@@ -366,8 +638,14 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 }
 
 /* AO3 commas control */
-.${NS}-own-commas li::after { content: "" !important; }
-a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35em; }
+.${NS}-own-commas li::after { 
+content: "" !important; 
+}
+
+a.tag.${NS}-tag-wrap .${NS}-tag-comma { 
+text-decoration: none; 
+margin-right: .35em; 
+}
   `;
 
   function forceShow(el){
@@ -722,6 +1000,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
     const box = document.createElement('div');
     box.className = `${NS}-mgr`;
     box.innerHTML = `
+      <button class="${NS}-close-x" type="button" aria-label="Close" title="Close">×</button>
       <h3>AO3 Helper — Hidden Tags (Groups)</h3>
       <div class="${NS}-ul-head">
         <input class="${NS}-ul-search" type="search" placeholder="Rechercher par tag ou groupe…" />
@@ -732,12 +1011,11 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
         <button class="${NS}-ul-btn import"  type="button">Import JSON (tags)</button>
         <button class="${NS}-ul-btn exportg" type="button" title="Export groups mapping">Export Groups</button>
         <button class="${NS}-ul-btn importg" type="button" title="Import Groups">Import Groups</button>
-        <button class="${NS}-ul-btn close"   type="button">Close</button> 
       </div>
       <div class="${NS}-ul-list" aria-live="polite"></div>
     `;
 
-        function close(){
+    function close(){
       // 🔓 unlock page scroll
       document.documentElement.classList.remove(`${NS}-lock`);
       document.body.classList.remove(`${NS}-lock`);
@@ -759,7 +1037,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
     backdrop.addEventListener('wheel',     e => e.preventDefault(), { passive: false });
     backdrop.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
-    box.querySelector('.close').addEventListener('click', close);
+    box.querySelector(`.${NS}-close-x`).addEventListener('click', close);
     document.addEventListener('keydown', function esc(e){
       if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
     });
@@ -815,13 +1093,13 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
       $list.innerHTML = '';
       let shown = 0;
 
-      const collapsedSet = getCollapsedSet();
-
+      // Always render groups collapsed on open
       for (const [gname, tags] of entries) {
         const block = document.createElement('div');
         block.className = `${NS}-ul-group`;
 
-        const isCollapsed = collapsedSet.has(gname);
+        // Force collapsed on initial render
+        const isCollapsed = true;
         block.setAttribute('aria-expanded', String(!isCollapsed));
 
         const head = document.createElement('div');
@@ -907,13 +1185,11 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
           if (expanded) {
             wrap.style.maxHeight = 'none';
             wrap.style.overflow  = 'visible';
-            collapsedSet.delete(gname);
           } else {
             wrap.style.maxHeight = '0px';
             wrap.style.overflow  = 'hidden';
-            collapsedSet.add(gname);
           }
-          setCollapsedSet(collapsedSet);
+          // No saving of collapsed state — every open starts closed
         }
 
         head.addEventListener('click', toggleGroup);
@@ -1003,8 +1279,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35
     });
 
     // close
-    box.querySelector('.close').addEventListener('click', close);
-
+    // (No separate “Close” button anymore; handled by ×)
     reload();
   }
   /* ------------------------- /Hidden Tags Manager -------------------------- */
