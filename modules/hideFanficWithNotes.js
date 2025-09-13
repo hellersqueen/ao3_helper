@@ -1,8 +1,3 @@
-/* modules/hideFanficWithNotes.js — hide works with user notes (IndexedDB + note picker)
-   Live-toggle safe, legacy-safe cleanup, CANCELABLE debounce, TEMP-SHOW allowlist,
-   proper import/export to IndexedDB, compatibility with HideByTags fold/cut,
-   and DOM-cached reason so Hide→Show→Hide reuses the original note instantly. */
-
 ;(function(){
   'use strict';
 
@@ -18,71 +13,69 @@
   const STORE   = 'works';
 
   /* ------------------------------- Styles -------------------------------- */
-  // Styles for the Hide bar + centered minimal picker
-  if (css) css`
-    /* Hide bar attached inside a blurb (unique class to avoid collisions) */
-    .${NS}-m5-hidebar{
-      display:flex; align-items:flex-start; justify-content:space-between;
-      gap:10px;
-      padding:6px 10px; background:#f5f6f8; border:1px solid #d7dbe3; border-radius:8px;
-      margin:.5em 0;
-      font-size:12px;
-      color:#1b2430;
-    }
-    .${NS}-m5-hidebar .left{
-      display:flex; gap:.5em; align-items:flex-start; min-width:0; padding-top: 4px;
-    }
-    .${NS}-m5-hidebar .label{ opacity:.8 }
+ if (css) css`
+  /* Hide bar attached inside a blurb (unique class to avoid collisions) */
+  .${NS}-m5-hidebar{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px;
+    padding:6px 10px; background:#f5f6f8; border:1px solid #d7dbe3; border-radius:8px;
+    margin:.5em 0;
+    font:14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color:#1b2430;
+  }
+  .${NS}-m5-hidebar .left{
+    display:flex; gap:.5em; align-items:center; min-width:0;
+  }
+  .${NS}-m5-hidebar .label{ opacity:.8 }
+  .${NS}-m5-hidebar .reason-text{
+    font-weight:600;
+    white-space:normal;       /* allow wrapping */
+    overflow:visible;         /* no clipping */
+    text-overflow:unset;      /* no ellipsis */
+    max-width:none;           /* no fixed width */
+    overflow-wrap:anywhere;   /* break long words/URLs if needed */
+    word-break:break-word;
+  }
 
-    /* Let long notes show fully (wrap, keep newlines), and break very long tokens/URLs */
-    .${NS}-m5-hidebar .reason-text{
-      font-weight:600;
-      white-space:pre-wrap;    /* allow wrapping + respect \n */
-      overflow:visible;        /* no clipping */
-      text-overflow:clip;      /* no ellipsis */
-      max-width:none;          /* no width cap */
-      word-break:break-word;   /* wrap long URLs/strings */
-    }
+  .${NS}-m5-hidebar .right{ display:flex; gap:6px }
+  .${NS}-m5-btn{
+    border:1px solid #cfd6e2; background:#fff; border-radius:6px; padding:4px 8px; cursor:pointer;
+  }
+  .${NS}-m5-btn:hover{ background:#f1f5fb }
 
-    .${NS}-m5-hidebar .right{ display:flex; gap:6px; }
-    .${NS}-m5-btn{
-      border:1px solid #cfd6e2; background:#fff; font-size: 12px; border-radius:6px; padding:4px 8px; cursor:pointer;
-    }
-    .${NS}-m5-btn:hover{ background:#f1f5fb }
+  /* The "Hide" trigger button near the blurb header */
+  .${NS}-m5-hide-btn{
+    float:right; margin-right:8px; margin-top:-24px;
+    border:1px solid #cfd6e2; background:#fff; border-radius:6px; padding:2px 8px; cursor:pointer;
+    font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  .${NS}-m5-hide-btn:hover{ background:#f1f5fb }
 
-    /* The "Hide" trigger button near the blurb header */
-    .${NS}-m5-hide-btn{
-      float:right; margin-right:8px; margin-top:-45px;
-      border:1px solid #cfd6e2; background:#fff; border-radius:6px; padding:4px 8px; cursor:pointer;
-      font-size: 12px;
-    }
-    .${NS}-m5-hide-btn:hover{ background:#f1f5fb }
+  /* ===== Centered minimal picker ===== */
+  .${NS}-m5-picker{
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+    background:#fff; border:1px solid #cfd6e2; border-radius:12px; padding:14px;
+    box-shadow:0 18px 48px rgba(0,0,0,.18); display:none; z-index:99999; width:min(520px,92vw);
+    font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color:#0f172a;
+  }
+  .${NS}-m5-picker.${NS}-open{ display:block; }
 
-    /* ===== Centered minimal picker ===== */
-    .${NS}-m5-picker{
-      position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
-      background:#fff; border:1px solid #cfd6e2; border-radius:12px; padding:14px;
-      box-shadow:0 18px 48px rgba(0,0,0,.18); display:none; z-index:99999; width:min(520px,92vw);
-      font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      color:#0f172a;
-    }
-    .${NS}-m5-picker.${NS}-open{ display:block; }
-
-    .${NS}-m5p-title{ font-weight:700; }
-    .${NS}-m5p-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
-    .${NS}-m5p-chip{
-      border:1px solid #c7cbd3; border-radius:999px; padding:4px 10px; cursor:pointer; background:#f8fafc;
-    }
-    .${NS}-m5p-chip:hover{ background:#eef2f8 }
-    .${NS}-m5p-row{ display:flex; gap:8px; }
-    .${NS}-m5p-input{ flex:1; padding:6px 8px; border:1px solid #cfd6e2; border-radius:6px; }
-    .${NS}-m5p-add, .${NS}-m5p-cancel{
-      border:1px solid #cfd6e2; background:#f6f8fb; border-radius:6px; padding:6px 10px; cursor:pointer;
-    }
-    .${NS}-m5p-add:hover, .${NS}-m5p-cancel:hover{ background:#eef2f8 }
-    .${NS}-m5p-hint{ opacity:.7; font-size:12px; margin-top:8px }
-    .${NS}-m5p-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:10px }
-  `;
+  .${NS}-m5p-title{ font-weight:700; }
+  .${NS}-m5p-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+  .${NS}-m5p-chip{
+    border:1px solid #c7cbd3; border-radius:999px; padding:4px 10px; cursor:pointer; background:#f8fafc;
+  }
+  .${NS}-m5p-chip:hover{ background:#eef2f8 }
+  .${NS}-m5p-row{ display:flex; gap:8px; }
+  .${NS}-m5p-input{ flex:1; padding:6px 8px; border:1px solid #cfd6e2; border-radius:6px; }
+  .${NS}-m5p-add, .${NS}-m5p-cancel{
+    border:1px solid #cfd6e2; background:#f6f8fb; border-radius:6px; padding:6px 10px; cursor:pointer;
+  }
+  .${NS}-m5p-add:hover, .${NS}-m5p-cancel:hover{ background:#eef2f8 }
+  .${NS}-m5p-hint{ opacity:.7; font-size:12px; margin-top:8px }
+  .${NS}-m5p-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:10px }
+`;
 
   /* ----------------------------- IndexedDB ------------------------------- */
   let db;
@@ -130,19 +123,35 @@
     });
   }
 
+  /* ----------------------------- TEMP-SHOW ------------------------------- */
+  // Per-path allowlist of works temporarily revealed (so Hide can instantly re-hide with the saved note).
+  let tempShow = new Set();
+  const tempKey = () => `${NS}:m5:tempShow:${location.pathname}`;
+  function loadTempShow(){
+    try{
+      const raw = sessionStorage.getItem(tempKey());
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    }catch{ return new Set(); }
+  }
+  function saveTempShow(){
+    try{ sessionStorage.setItem(tempKey(), JSON.stringify([...tempShow])); }catch{}
+  }
+  function clearTempShow(){
+    tempShow.clear();
+    try{ sessionStorage.removeItem(tempKey()); }catch{}
+  }
+
   /* ----------------------------- Utilities -------------------------------- */
   // jQuery is available on AO3; use the page copy.
   function $(sel, root){ return (W.jQuery || W.$)(sel, root); }
 
-  // Compute a stable ID and cache it on the blurb to avoid any mismatch later.
   function workIdFromBlurb($blurb) {
-    const el = $blurb[0];
-    if (!el) return '';
-    if (el.dataset.ao3hWorkid) return el.dataset.ao3hWorkid;
-    const href = $blurb.find('.header .heading a:first').attr('href') || '';
-    const id = href.replace(/(#.*|\?.*)$/, ''); // strip query/hash
-    el.dataset.ao3hWorkid = id;
-    return id;
+    // Prefer the first heading link with /works/ID; normalize to path-only without query/hash
+    const a = $blurb.find('.header .heading a[href*="/works/"]').first();
+    const href = (a.attr('href') || '').replace(/(#.*|\?.*)$/, '');
+    // If not found, fallback to any anchor with /works/
+    return href || ($blurb.find('a[href*="/works/"]').first().attr('href') || '').replace(/(#.*|\?.*)$/, '');
   }
 
   /* --------------------------- Quick-note picker -------------------------- */
@@ -238,54 +247,49 @@
     btn.className = `${NS}-m5-hide-btn`;
     $header.append(btn);
 
-    // ===== Auto-restore prior note on Hide if one exists =====
-    btn.addEventListener('click', async () => {
+    // ===== Auto-restore prior note on Hide if one exists, and support temp-show rehide =====
+    btn.addEventListener('click', async (e) => {
       const workId = workIdFromBlurb($blurb);
       if (!workId) return;
       try {
-        // 1) Prefer DOM-cached reason (fast, never races DB)
-        const domReason = ($blurb[0].dataset.ao3hReason || '').trim();
-        if (domReason) {
-          hideWork($blurb[0], domReason);
-          // keep DB in sync
-          if (db) await putWork({ workId, reason: domReason, isHidden: true });
+        const existing = await getWork(workId);
+
+        // quick toggle: any modifier skips the picker (uses stored note if available)
+        const quick = e.shiftKey || e.altKey || e.ctrlKey || e.metaKey;
+
+        const blurbEl = $blurb[0];
+        const barPresent = !!$blurb.find(`.${NS}-m5-hidebar`).length;
+
+        const wasHidden = !!(existing && existing.isHidden);
+        const wasTempShown = wasHidden && tempShow.has(workId);
+        const visibleButShouldBeHidden = wasHidden && !barPresent;
+
+        // Case A: re-hide without picker (temp show or visible-but-should-be-hidden)
+        if (wasTempShown || visibleButShouldBeHidden || quick){
+          tempShow.delete(workId); saveTempShow();
+          const reason = (existing && typeof existing.reason === 'string') ? existing.reason.trim() : '';
+          hideWork(blurbEl, reason);
+          await putWork({ workId, reason, isHidden: true });
           return;
         }
 
-        // 2) Fallback: load from DB
-        let reason = '';
-        if (db) {
-          const existing = await getWork(workId);
-          if (existing && typeof existing.reason === 'string') {
-            reason = existing.reason.trim();
-          }
-        }
+        // Case B: first-time hide OR editing note via picker
+        const seed = (existing && typeof existing.reason === 'string') ? existing.reason : '';
+        let reason = await pickReasonCenteredMinimal(seed || '');
+        if (reason === null) return; // cancelled
+        reason = String(reason).trim();
+        if (!reason && !seed) return; // nothing chosen on first-time
 
-        if (reason) {
-          hideWork($blurb[0], reason);
-          if (db) await putWork({ workId, reason, isHidden: true });
-          return;
-        }
-
-        // 3) First-time hide → ask once
-        let picked = await pickReasonCenteredMinimal('');
-        if (picked === null) return; // cancelled
-        picked = String(picked).trim();
-        if (!picked) return;
-
-        hideWork($blurb[0], picked);
-        if (db) await putWork({ workId, reason: picked, isHidden: true });
-      } catch (e) { console.error('[AO3H] hide click failed', e); }
+        tempShow.delete(workId); saveTempShow();
+        hideWork(blurbEl, reason || seed || '');
+        await putWork({ workId, reason: (reason || seed || ''), isHidden: true });
+      } catch (err) { console.error('[AO3H] hide click failed', err); }
     });
   }
 
   function hideWork(blurbEl, reason) {
     const $blurb = $(blurbEl);
     if ($blurb.find(`.${NS}-m5-hidebar`).length) return;
-
-    // Cache reason + hidden state on the DOM itself (for instant re-hide)
-    blurbEl.dataset.ao3hReason = String(reason || '');
-    blurbEl.dataset.ao3hHidden = '1';
 
     // Build bar
     const bar = document.createElement('div');
@@ -301,7 +305,7 @@
         <button type="button" class="${NS}-m5-btn unhide">Unhide</button>
       </div>
     `;
-    bar.querySelector('.reason-text').textContent = reason;
+    bar.querySelector('.reason-text').textContent = reason || '';
 
     // Hide original blurb content (except our bar)
     const children = Array.from(blurbEl.children);
@@ -323,8 +327,6 @@
     $blurb.find(`.${NS}-m5-hidebar`).remove();
     // Re-show the Hide button
     $blurb.find(`.${NS}-m5-hide-btn`).show();
-    // Keep the reason so a second Hide is instant
-    blurbEl.dataset.ao3hHidden = '0';
   }
 
   /* ----------------------------- Import/Export ---------------------------- */
@@ -437,17 +439,18 @@
       ensureHideButton($b);
     });
 
-    // Re-apply persisted hidden state (and seed DOM cache for instant re-hide)
+    // Re-apply persisted hidden state (skip re-hiding items currently temp-shown)
     const all = await getAllWorks();
     $('ol.index li.blurb').each((_, el) => {
       const $b = $(el);
       const id = workIdFromBlurb($b);
       const rec = all.find(r => r.workId === id);
       if (rec && rec.isHidden) {
-        // seed cache before we hide
-        el.dataset.ao3hReason = String(rec.reason || '');
-        el.dataset.ao3hHidden = '1';
-        hideWork(el, rec.reason || '');
+        if (tempShow.has(id)) {
+          showWork(el); // keep it shown temporarily
+        } else {
+          hideWork(el, rec.reason || '');
+        }
       }
     });
   }
@@ -458,13 +461,18 @@
     if (delegatesWired) return;
     const $doc = (W.jQuery || W.$)(document);
 
+    // SHOW = temporary reveal (DB unchanged, mark in tempShow)
     $doc.on('click', `.${NS}-m5-hidebar .show`, async function () {
-      const blurbEl = (W.jQuery || W.$)(this).closest('li')[0];
+      const $b = (W.jQuery || W.$)(this).closest('li');
+      const blurbEl = $b[0];
       if (!blurbEl) return;
-      // Temporary reveal; DB unchanged; DOM still keeps the reason for instant re-hide
+      const id = workIdFromBlurb($b);
+      if (!id) return;
       showWork(blurbEl);
+      tempShow.add(id); saveTempShow();
     });
 
+    // UNHIDE = permanent (set isHidden=false but keep the note)
     $doc.on('click', `.${NS}-m5-hidebar .unhide`, async function () {
       const $b = (W.jQuery || W.$)(this).closest('li');
       const blurbEl = $b[0];
@@ -473,13 +481,15 @@
       if (!id) return;
       if (!confirm('Unhide this work permanently (until you hide it again)?')) return;
       showWork(blurbEl);
+      tempShow.delete(id); saveTempShow();
       try {
-        const rec = (await getWork(id)) || { workId: id, reason: (blurbEl.dataset.ao3hReason || '') };
+        const rec = (await getWork(id)) || { workId: id, reason: '' };
         rec.isHidden = false;
         await putWork(rec);
       } catch (e) { console.error('[AO3H] unhide failed', e); }
     });
 
+    // EDIT = update reason and keep hidden
     $doc.on('click', `.${NS}-m5-hidebar .edit-reason`, async function () {
       const $b = (W.jQuery || W.$)(this).closest('li');
       const blurbEl = $b[0];
@@ -492,8 +502,6 @@
       const next = String(nextPicked).trim();
       if (!next) return;
       $reason.text(next);
-      // update DOM cache + DB
-      blurbEl.dataset.ao3hReason = next;
       try {
         const rec = (await getWork(id)) || { workId: id };
         rec.reason = next;
@@ -516,10 +524,13 @@
   }
 
   async function init() {
-    if (!/\/works\b/.test(location.pathname)) return;
+    // Light route guard; keep if desired
+    // if (!/\/works\b/.test(location.pathname)) return;
     if (!W.jQuery && !W.$) { console.error('[AO3H] jQuery not found on page'); return; }
 
     if (!db) await openDB();
+    tempShow = loadTempShow();
+
     await transferFromLocalStorage();
 
     wireDelegatesOnce();
@@ -535,4 +546,10 @@
     const ready = onReady || ((fn)=>document.readyState!=='loading'?fn():document.addEventListener('DOMContentLoaded',fn));
     ready(init);
   }
+
+  // Optional cleanup hook if you wire enable/disable later
+  function stop(){
+    clearTempShow();
+  }
+
 })();
