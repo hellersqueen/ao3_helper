@@ -1,6 +1,6 @@
 /* modules/hideFanficWithNotes.js — hide works with user notes (IndexedDB + note picker)
    Live-toggle safe, legacy-safe cleanup, CANCELABLE debounce, TEMP-SHOW allowlist,
-   and **proper import/export to IndexedDB** with legacy migration. */
+   proper import/export to IndexedDB, and compatibility with HideByTags fold/cut. */
 
 ;(function(){
   'use strict';
@@ -12,574 +12,499 @@
   const { onReady, observe, css } = (AO3H.util || {});
 
   const MOD_ID   = 'HideFanficWithNotes';
-  const FLAG_CAN = 'mod:HideFanficWithNotes:enabled';
-  const FLAG_ALT = 'mod:hidefanficwithnotes:enabled';
 
   const DB_NAME = 'ao3h-hiddenWorksDB';
   const STORE   = 'works';
 
   /* ------------------------------- Styles -------------------------------- */
-  css`
-    .${NS}-hide-btn{ float:right; margin-right:8px; margin-top:-24px; }
-    .${NS}-hidebar{
+  // Styles for the Hide bar + centered minimal picker
+  if (css) css`
+    /* Hide bar attached inside a blurb (unique class to avoid collisions) */
+    .${NS}-m5-hidebar{
       display:flex; align-items:center; justify-content:space-between;
-      padding:6px 10px; background:#f0f0f0; border-radius:6px; margin:.4em 0;
+      gap:10px;
+      padding:6px 10px; background:#f5f6f8; border:1px solid #d7dbe3; border-radius:8px;
+      margin:.5em 0;
+      font-size:12px;
+      color:#1b2430;
     }
-    .${NS}-hidebar .reason{ font-weight:600; }
-    .${NS}-picker{
+    .${NS}-m5-hidebar .left{
+      display:flex; gap:.5em; align-items:center; min-width:0; padding-top: 4px;
+    }
+    .${NS}-m5-hidebar .label{ opacity:.8 }
+    /* Let long notes show fully (wrap, keep newlines), and break very long tokens/URLs */
+.${NS}-m5-hidebar .reason-text{
+  font-weight:600;
+  white-space:pre-wrap;    /* allow wrapping + respect \n */
+  overflow:visible;        /* no clipping */
+  text-overflow:clip;      /* no ellipsis */
+  max-width:none;          /* no width cap */
+  word-break:break-word;   /* wrap long URLs/strings */
+}
+
+/* (Optional) make multi-line notes align nicely in the bar */
+.${NS}-m5-hidebar{ align-items:flex-start; }
+.${NS}-m5-hidebar .left{ align-items:flex-start; }
+
+
+    .${NS}-m5-hidebar .right{ display:flex; gap:6px; }
+    .${NS}-m5-btn{
+      border:1px solid #cfd6e2; background:#fff; font-size: 12px; border-radius:6px; padding:4px 8px; cursor:pointer;
+    }
+    .${NS}-m5-btn:hover{ background:#f1f5fb }
+
+    /* The "Hide" trigger button near the blurb header */
+    .${NS}-m5-hide-btn{
+      float:right; margin-right:8px; margin-top:-45px;
+      border:1px solid #cfd6e2; background:#fff; border-radius:6px; padding:4px 8px; cursor:pointer;
+      font-size: 12px;
+    }
+    .${NS}-m5-hide-btn:hover{ background:#f1f5fb }
+
+    /* ===== Centered minimal picker ===== */
+    .${NS}-m5-picker{
       position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
-      background:#fff; border:1px solid #bbb; border-radius:10px; padding:12px;
-      box-shadow:0 10px 28px rgba(0,0,0,.18); display:none; z-index:99999; width:min(420px,92vw);
+      background:#fff; border:1px solid #cfd6e2; border-radius:12px; padding:14px;
+      box-shadow:0 18px 48px rgba(0,0,0,.18); display:none; z-index:99999; width:min(520px,92vw);
       font:14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color:#0f172a;
     }
-    .${NS}-picker.${NS}-open{ display:block; }
-    .${NS}-picker .chips{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
-    .${NS}-picker .chip{ border:1px solid #c7c7c7; border-radius:999px; padding:4px 10px; cursor:pointer; background:#fafafa; }
-    .${NS}-picker .row{ display:flex; gap:8px; }
-    .${NS}-picker input{ flex:1; padding:6px 8px; border:1px solid #cfcfcf; border-radius:6px; }
-    .${NS}-picker button{ border:1px solid #bdbdbd; background:#f6f6f6; border-radius:6px; padding:6px 10px; cursor:pointer; }
-    .${NS}-picker button:hover{ background:#efefef; }
+    .${NS}-m5-picker.${NS}-open{ display:block; }
+
+    .${NS}-m5p-title{ font-weight:700; }
+    .${NS}-m5p-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+    .${NS}-m5p-chip{
+      border:1px solid #c7cbd3; border-radius:999px; padding:4px 10px; cursor:pointer; background:#f8fafc;
+    }
+    .${NS}-m5p-chip:hover{ background:#eef2f8 }
+    .${NS}-m5p-row{ display:flex; gap:8px; }
+    .${NS}-m5p-input{ flex:1; padding:6px 8px; border:1px solid #cfd6e2; border-radius:6px; }
+    .${NS}-m5p-add, .${NS}-m5p-cancel{
+      border:1px solid #cfd6e2; background:#f6f8fb; border-radius:6px; padding:6px 10px; cursor:pointer;
+    }
+    .${NS}-m5p-add:hover, .${NS}-m5p-cancel:hover{ background:#eef2f8 }
+    .${NS}-m5p-hint{ opacity:.7; font-size:12px; margin-top:8px }
+    .${NS}-m5p-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:10px }
   `;
 
   /* ----------------------------- IndexedDB ------------------------------- */
   let db;
-  function openDB(){
-    if (db) return Promise.resolve(db);
-    return new Promise((resolve,reject)=>{
-      const req = indexedDB.open(DB_NAME,1);
-      req.onupgradeneeded = (ev)=>{
-        const dbx = ev.target.result;
-        const store = dbx.createObjectStore(STORE,{ keyPath:'workId' });
-        store.createIndex('reason','reason',{ unique:false });
-        store.createIndex('isHidden','isHidden',{ unique:false });
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = (event) => {
+        const dbx = event.target.result;
+        if (!dbx.objectStoreNames.contains(STORE)) {
+          const objectStore = dbx.createObjectStore(STORE, { keyPath: 'workId' });
+          objectStore.createIndex('reason', 'reason', { unique: false });
+          objectStore.createIndex('isHidden', 'isHidden', { unique: false });
+        }
       };
-      req.onsuccess = (ev)=>{ db=ev.target.result; resolve(db); };
-      req.onerror   = (ev)=>reject(ev.target.error);
+      req.onsuccess = (e) => {
+        db = e.target.result;
+        db.onversionchange = () => { try { db.close(); } catch {} };
+        resolve(db);
+      };
+      req.onerror = (e) => reject(e.target.error);
     });
   }
-  function getAll(){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readonly'); const req=tx.objectStore(STORE).getAll(); req.onsuccess=()=>res(req.result||[]); req.onerror=()=>rej(); }); }
-  function getOne(id){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readonly'); const req=tx.objectStore(STORE).get(id); req.onsuccess=()=>res(req.result||null); req.onerror=()=>rej(); }); }
-  function put(rec){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readwrite'); const req=tx.objectStore(STORE).put(rec); req.onsuccess=()=>res(true); req.onerror=()=>rej(req.error); }); }
-  function bulkPut(recs){ return new Promise((res,rej)=>{ const tx=db.transaction([STORE],'readwrite'); const os=tx.objectStore(STORE); recs.forEach(r=>os.put(r)); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); }); }
-
-  /* --------------------------- Quick-note picker -------------------------- */
-  const DEFAULT_CHIPS = [
-    'crossover','sequel','bad summary','parent/dad','unfinished',
-    'POV 1st','established','not focused','always-a-girl'
-  ];
-
-  async function pickReason(seed=''){
-    let panel = document.getElementById(`${NS}-picker`);
-    if (!panel){
-      panel = document.createElement('div');
-      panel.id = `${NS}-picker`; panel.className = `${NS}-picker`;
-      panel.innerHTML = `
-        <div><strong>Choose a tag or write a note</strong></div>
-        <div class="chips"></div>
-        <div class="row">
-          <input type="text" id="${NS}-pick-inp" placeholder="Write a note…" />
-          <button id="${NS}-pick-add">Add</button>
-        </div>
-        <div style="margin-top:6px;display:flex;gap:8px;justify-content:flex-end">
-          <button id="${NS}-pick-cancel">Cancel</button>
-        </div>`;
-      (document.body || document.documentElement).appendChild(panel);
-    }
-    const chips = panel.querySelector('.chips');
-    chips.innerHTML = '';
-    DEFAULT_CHIPS.forEach(tag=>{
-      const chip = document.createElement('span');
-      chip.className='chip'; chip.textContent=tag;
-      chip.addEventListener('click', ()=>finish(tag), { once:true });
-      chips.appendChild(chip);
+  function getAllWorks() {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE], 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror   = () => reject(new Error('getAll failed'));
     });
-
-    const inp = panel.querySelector('#'+NS+'-pick-inp');
-    const add = panel.querySelector('#'+NS+'-pick-add');
-    const cancel = panel.querySelector('#'+NS+'-pick-cancel');
-    inp.value = seed || '';
-
-    let resolver; const p = new Promise(r=>resolver=r);
-    function finish(val){ panel.classList.remove(`${NS}-open`); resolver(val); }
-
-    add.onclick = ()=>{ const v=(inp.value||'').trim(); if (v) finish(v); };
-    cancel.onclick = ()=>finish(null);
-    panel.classList.add(`${NS}-open`); inp.focus();
-    panel.addEventListener('keydown', (e)=>{ if (e.key==='Enter') add.click(); if (e.key==='Escape') cancel.click(); });
-
-    return p;
+  }
+  function getWork(workId) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE], 'readonly');
+      const req = tx.objectStore(STORE).get(workId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror   = () => reject(new Error('get failed'));
+    });
+  }
+  function putWork(rec) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE], 'readwrite');
+      const req = tx.objectStore(STORE).put(rec);
+      req.onsuccess = () => resolve(true);
+      req.onerror   = () => reject(new Error('put failed'));
+    });
   }
 
   /* ----------------------------- Utilities -------------------------------- */
-  function queryAllBlurbs(root=document){
-    const ls = Array.from(root.querySelectorAll('ol.index li.blurb'));
-    if (ls.length) return ls;
-    return Array.from(root.querySelectorAll('#main li.blurb, li.blurb'));
-  }
-  function ensureHideButton(blurb){
-    if (blurb.querySelector('.'+NS+'-hide-btn')) return;
-    const header = blurb.querySelector('.header') || blurb.querySelector('.heading') || blurb;
-    const btn = document.createElement('button');
-    btn.className = `${NS}-hide-btn`;
-    btn.type = 'button';
-    btn.textContent = 'Hide';
-    btn.title = 'Hide (Shift-click to skip note)';
-    header.appendChild(btn);
-  }
-  function removeHideButtons(){ document.querySelectorAll('.'+NS+'-hide-btn').forEach(b=>b.remove()); }
+  // jQuery is available on AO3; use the page copy.
+  function $(sel, root){ return (W.jQuery || W.$)(sel, root); }
 
-  function getWorkIdFromBlurb(blurb){
-    if (!blurb || typeof blurb.querySelectorAll !== 'function') return null;
-    const candidates = blurb.querySelectorAll('.header .heading a, .header a, a[href*="/works/"]');
-    for (const a of candidates){
-      const href = a.getAttribute('href') || '';
-      if (/\/works\/\d+/.test(href)) {
-        // normaliser: garder le chemin sans query/fragment
-        return href.replace(/(#.*|\?.*)$/,'').match(/\/works\/\d+/)[0];
-      }
-    }
-    return null;
+  function workIdFromBlurb($blurb) {
+    const href = $blurb.find('.header .heading a:first').attr('href') || '';
+    // Normalize to a stable ID (strip query/hash)
+    return href.replace(/(#.*|\?.*)$/, '');
   }
 
-  function hideWork(blurb, reason){
-    if (blurb.querySelector('.'+NS+'-hidebar')) return;
-    const bar = document.createElement('div');
-    bar.className = `${NS}-hidebar`;
-    bar.innerHTML = `
-      <div>This work is hidden: <span class="reason"></span></div>
-      <div>
-        <button class="edit" type="button">Edit</button>
-        <button class="show" type="button">Show</button>
-        <button class="unhide" type="button" title="Unhide permanently (keeps note)">Unhide</button>
-      </div>`;
-    bar.querySelector('.reason').textContent = reason || '';
-    blurb.appendChild(bar);
-
-    Array.from(blurb.children).forEach(c=>{
-      if (c !== bar) {
-        c.dataset.ao3hHfn = '1';
-        c.style.display = 'none';
-      }
-    });
-  }
-  function showWork(blurb){
-    blurb.querySelectorAll('.'+NS+'-hidebar').forEach(x=>x.remove());
-    Array.from(blurb.children).forEach(c=>{
-      if (c.dataset && c.dataset.ao3hHfn === '1') {
-        c.style.removeProperty('display');
-        delete c.dataset.ao3hHfn;
-      }
-    });
-  }
-  function forceReveal(blurb){
-    blurb.querySelectorAll('.'+NS+'-hidebar').forEach(b=>b.remove());
-    Array.from(blurb.children).forEach(c=>{
-      if (c.style && c.style.display === 'none') c.style.removeProperty('display');
-      if (c.dataset && c.dataset.ao3hHfn) delete c.dataset.ao3hHfn;
-    });
-  }
-  function unhideAllOnPage(){ document.querySelectorAll('li.blurb, .blurb').forEach(forceReveal); }
-
-  /* ------------------------------ Data cache ------------------------------ */
-  let hiddenCache = new Map();   // workId -> record {workId, reason, isHidden}
-
-  /* ---------------------- TEMP SHOW allowlist (per-path) ------------------ */
-  let tempShow = new Set();
-  const tempKey = ()=> `${NS}:hfn:tempShow:${location.pathname}`;
-  function loadTempShow(){
+  /* --------------------------- Quick-note picker -------------------------- */
+  const USER_QUICK_TAGS_DEFAULT = [
+    'crossover', 'sequel', 'bad summary', 'parent/dad', 'unfinished',
+    'growing up together', 'not sterek focused', '1rst pov', 'established', 'always-a-girl'
+  ];
+  const QUICK_TAGS_KEY = `${NS}:m5QuickTagsUser`;
+  function getUserQuickTags(){
     try {
-      const raw = sessionStorage.getItem(tempKey());
-      const arr = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(arr) ? arr : []);
-    } catch { return new Set(); }
-  }
-  function saveTempShow(){
-    try { sessionStorage.setItem(tempKey(), JSON.stringify([...tempShow])); } catch {}
-  }
-  function clearTempShow(){
-    tempShow.clear();
-    try { sessionStorage.removeItem(tempKey()); } catch {}
+      const v = JSON.parse(localStorage.getItem(QUICK_TAGS_KEY) || 'null');
+      if (Array.isArray(v) && v.every(x => typeof x === 'string')) return v;
+    } catch {}
+    return USER_QUICK_TAGS_DEFAULT;
   }
 
-  /* -------------------------- cancelable debounce ------------------------- */
-  function makeDebounce(fn, ms=120){
-    let t = null;
-    const deb = (...a)=>{
-      clearTimeout(t);
-      t = setTimeout(()=>{ fn(...a); }, ms);
-    };
-    deb.cancel = ()=>{ clearTimeout(t); t = null; };
-    return deb;
-  }
-
-  let active = false;
-  let mo = null;
-  let clickHandler = null;
-  let navEvtHandler = null;
-  let busUnsub = null;
-
-  function guarded(fn){ return (...a)=>{ if (!active) return; fn(...a); }; }
-
-  async function refreshCache(){
-    await openDB();
-    const all = await getAll();
-    hiddenCache = new Map(all.map(r => [r.workId, r]));
-  }
-
-  function applyStoredHides(){
-    if (!active) return;
-    const blurbs = queryAllBlurbs();
-    for (const blurb of blurbs){
-      const id = getWorkIdFromBlurb(blurb);
-      if (!id) continue;
-      const rec = hiddenCache.get(id);
-
-      if (rec?.isHidden) {
-        if (tempShow.has(id)) {
-          showWork(blurb);
-          ensureHideButton(blurb);
-        } else {
-          ensureHideButton(blurb);
-          hideWork(blurb, rec.reason || '');
-        }
-      } else {
-        showWork(blurb);
-        ensureHideButton(blurb);
-      }
+  async function pickReasonCenteredMinimal(seed=''){
+    let panel = document.getElementById(`${NS}-m5-picker`);
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = `${NS}-m5-picker`;
+      panel.className = `${NS}-m5-picker`;
+      panel.innerHTML = `
+        <div class="${NS}-m5p-title">Choose a tag or write a note</div>
+        <div class="${NS}-m5p-chips"></div>
+        <div class="${NS}-m5p-row">
+          <input type="text" class="${NS}-m5p-input" placeholder="Write a note here…" />
+          <button type="button" class="${NS}-m5p-add">Add</button>
+        </div>
+        <div class="${NS}-m5p-hint">Tip: click a tag to save immediately • Press Esc to cancel • Enter = Add</div>
+        <div class="${NS}-m5p-actions">
+          <button type="button" class="${NS}-m5p-cancel">Cancel</button>
+        </div>
+      `;
+      document.body.appendChild(panel);
     }
+
+    // Populate chips
+    const chipsWrap = panel.querySelector(`.${NS}-m5p-chips`);
+    chipsWrap.innerHTML = '';
+    for (const tag of getUserQuickTags()) {
+      const chip = document.createElement('span');
+      chip.className = `${NS}-m5p-chip`;
+      chip.textContent = tag;
+      chip.addEventListener('click', () => finish(tag)); // instant save
+      chipsWrap.appendChild(chip);
+    }
+
+    const input     = panel.querySelector(`.${NS}-m5p-input`);
+    const addBtn    = panel.querySelector(`.${NS}-m5p-add`);
+    const cancelBtn = panel.querySelector(`.${NS}-m5p-cancel`);
+
+    input.value = seed || '';
+
+    const onAdd = () => {
+      const val = (input.value || '').trim();
+      if (!val) return;
+      finish(val);
+    };
+    const onCancel = () => finish(null);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+      if (e.key === 'Enter')  { e.preventDefault(); onAdd(); }
+    };
+
+    addBtn.onclick = onAdd;
+    cancelBtn.onclick = onCancel;
+
+    // show & focus
+    panel.classList.add(`${NS}-open`);
+    input.focus();
+    document.addEventListener('keydown', onKey, true);
+
+    let resolver;
+    const p = new Promise(r => resolver = r);
+    function finish(result){
+      panel.classList.remove(`${NS}-open`);
+      document.removeEventListener('keydown', onKey, true);
+      resolver(result);
+    }
+    return p;
   }
 
-  function enhanceListOnce(){
-    if (!active) return;
-    const blurbs = queryAllBlurbs();
-    if (!blurbs.length) return;
-    blurbs.forEach(ensureHideButton);
-    applyStoredHides();
+  /* -------------------------- Blurb UI helpers ---------------------------- */
+  function ensureHideButton($blurb) {
+    if ($blurb.find(`.${NS}-m5-hide-btn`).length) return;
+    const $header = $blurb.find('.header').first();
+    if (!$header.length) return;
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Hide';
+    btn.type = 'button';
+    btn.className = `${NS}-m5-hide-btn`;
+    $header.append(btn);
+
+    // ===== CHANGE: auto-restore prior note on Hide if one exists =====
+    btn.addEventListener('click', async () => {
+      const workId = workIdFromBlurb($blurb);
+      if (!workId) return;
+      try {
+        const existing = await getWork(workId);
+
+        // If we already have a saved reason (non-empty), skip the picker
+        if (existing && typeof existing.reason === 'string' && existing.reason.trim()) {
+          const reason = existing.reason.trim();
+          hideWork($blurb[0], reason);
+          await putWork({ workId, reason, isHidden: true });
+          return;
+        }
+
+        // First-time hide (no saved note yet): ask once
+        let reason = await pickReasonCenteredMinimal('');
+        if (reason === null) return; // cancelled
+        reason = String(reason).trim();
+        if (!reason) return;
+
+        hideWork($blurb[0], reason);
+        await putWork({ workId, reason, isHidden: true });
+      } catch (e) { console.error('[AO3H] hide click failed', e); }
+    });
   }
 
-  const enhance = makeDebounce(()=>{ if (active) try{ enhanceListOnce(); }catch(e){ console.error('[AO3H][HFN] enhance failed', e); } }, 120);
+  function hideWork(blurbEl, reason) {
+    const $blurb = $(blurbEl);
+    if ($blurb.find(`.${NS}-m5-hidebar`).length) return;
+
+    // Build bar
+    const bar = document.createElement('div');
+    bar.className = `${NS}-m5-hidebar`;
+    bar.innerHTML = `
+      <div class="left">
+        <span class="label">Hidden:</span>
+        <span class="reason-text"></span>
+      </div>
+      <div class="right">
+        <button type="button" class="${NS}-m5-btn edit-reason">Edit</button>
+        <button type="button" class="${NS}-m5-btn show">Show</button>
+        <button type="button" class="${NS}-m5-btn unhide">Unhide</button>
+      </div>
+    `;
+    bar.querySelector('.reason-text').textContent = reason;
+
+    // Hide original blurb content (except our bar)
+    // Keep the container height stable by hiding siblings
+    const children = Array.from(blurbEl.children);
+    for (const ch of children) {
+      if (ch !== bar) ch.style.display = 'none';
+    }
+    blurbEl.appendChild(bar);
+
+    // Also hide the Hide button itself while hidden
+    $blurb.find(`.${NS}-m5-hide-btn`).hide();
+  }
+
+  function showWork(blurbEl) {
+    const $blurb = $(blurbEl);
+    // Reveal original content
+    const children = Array.from(blurbEl.children);
+    for (const ch of children) ch.style.display = '';
+    // Remove our bar
+    $blurb.find(`.${NS}-m5-hidebar`).remove();
+    // Re-show the Hide button
+    $blurb.find(`.${NS}-m5-hide-btn`).show();
+  }
 
   /* ----------------------------- Import/Export ---------------------------- */
-  // Legacy storage key (old design that wrote to GM/localStorage)
-  const LEGACY_STORAGE_KEY = `${NS}.hiddenWorks`;
-
-  function safeReadLegacy(){
-    try { if (typeof GM_getValue === 'function') return JSON.parse(GM_getValue(LEGACY_STORAGE_KEY, '[]')); } catch {}
-    try { return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || '[]'); } catch {}
-    return [];
-  }
-  function safeWriteLegacy(val){
-    const json = JSON.stringify(val, null, 2);
-    try { if (typeof GM_setValue === 'function') GM_setValue(LEGACY_STORAGE_KEY, json); } catch {}
-    try { localStorage.setItem(LEGACY_STORAGE_KEY, json); } catch {}
-  }
-
-  // Normalize any legacy entry into { workId: "/works/12345", reason: "note", isHidden: true }
-  function normalizeLegacyEntry(x){
-    if (!x && x !== 0) return null;
-
-    // String could be ID "12345" ou path "/works/12345" ou URL complète
-    if (typeof x === 'string' || typeof x === 'number'){
-      const s = String(x);
-      const m = s.match(/\/works\/\d+/) || s.match(/\d+/);
-      if (!m) return null;
-      const workIdPath = m[0].startsWith('/works/') ? m[0] : ('/works/' + m[0].replace(/^\//,''));
-      return { workId: workIdPath, reason: '', isHidden: true };
-    }
-
-    // Objet moderne
-    if (typeof x === 'object'){
-      // cas {workId: "...", reason, isHidden}
-      if (x.workId){
-        let wid = String(x.workId);
-        const m = wid.match(/\/works\/\d+/) || wid.match(/\d+/);
-        if (!m) return null;
-        wid = m[0].startsWith('/works/') ? m[0] : ('/works/' + m[0]);
-        return { workId: wid, reason: String(x.reason||''), isHidden: (x.isHidden!==false) };
-      }
-      // cas {id: 12345, note:"..."}
-      if (x.id){
-        const m = String(x.id).match(/\d+/);
-        if (!m) return null;
-        return { workId: '/works/' + m[0], reason: String(x.note||x.reason||''), isHidden: (x.hidden!==false) };
-      }
-    }
-    return null;
-  }
-
-  async function exportHiddenWorksIDB(){
-    await openDB();
-    const all = await getAll();
-    // On exporte uniquement les entrées cachées (isHidden=true), avec reason
-    const out = all.filter(r=>r && r.isHidden).map(r=>({ workId: r.workId, reason: r.reason||'', isHidden: true }));
-    const text = JSON.stringify(out, null, 2);
-    const blob = new Blob([text], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const stamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
-    a.href = url; a.download = `ao3-hidden-works-${stamp}.json`; a.rel='noopener';
-    (document.body || document.documentElement).appendChild(a);
-    a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
-  }
-
-  async function importHiddenWorksIDBFromJSON(jsonValue){
-    await openDB();
-    let incoming;
+  async function exportHiddenWorks() {
     try {
-      incoming = JSON.parse(String(jsonValue||'[]'));
+      if (!db) await openDB();
+      const all = await getAllWorks();
+      const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ao3-hidden-works-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      alert('Exported ' + all.length + ' hidden works.');
     } catch (e) {
-      alert('Invalid JSON: ' + e.message);
-      return { added:0, updated:0, total: hiddenCache.size };
+      console.error('[AO3H] export failed', e);
+      alert('Export failed. See console for details.');
     }
-    if (!Array.isArray(incoming)) incoming = [incoming];
+  }
+  W.ao3hExportHiddenWorks = exportHiddenWorks;
 
-    // Normaliser toutes les entrées
-    const normalized = incoming.map(normalizeLegacyEntry).filter(Boolean);
-    if (!normalized.length){
-      alert('No valid entries found to import.');
-      return { added:0, updated:0, total: hiddenCache.size };
-    }
-
-    // Merge dans l’IDB
-    const toWrite = [];
-    let added=0, updated=0;
-
-    // Charger cache courant pour comparer
-    if (!db) await openDB();
-    if (!hiddenCache.size) await refreshCache();
-
-    for (const rec of normalized){
-      const curr = hiddenCache.get(rec.workId);
-      if (!curr){
-        toWrite.push({ workId: rec.workId, reason: String(rec.reason||''), isHidden: (rec.isHidden!==false) });
-        added++;
-      } else {
-        // Mettre à jour seulement si note/état diffèrent
-        const wantHidden = (rec.isHidden!==false);
-        const wantReason = String(rec.reason||'');
-        if (curr.isHidden !== wantHidden || (wantReason && wantReason !== (curr.reason||''))){
-          toWrite.push({ workId: rec.workId, reason: wantReason, isHidden: wantHidden });
-          updated++;
-        }
+  async function importHiddenWorksFromFile(file) {
+    try {
+      const text = await file.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        alert('Import failed: invalid JSON file.');
+        return;
       }
-    }
 
-    if (toWrite.length){
-      await bulkPut(toWrite);
-      await refreshCache();
-      applyStoredHides();
-    }
+      if (!Array.isArray(parsed)) {
+        alert('Import failed: JSON must be an array.');
+        return;
+      }
 
-    return { added, updated, total: hiddenCache.size };
+      if (!db) await openDB();
+
+      let created = 0, updated = 0, skipped = 0;
+
+      for (const rec of parsed) {
+        if (!rec || typeof rec !== 'object') { skipped++; continue; }
+        const workId = rec.workId || rec.id || rec.href;
+        const reason = rec.reason ?? '';
+        if (!workId) { skipped++; continue; }
+
+        const toPut = { workId, reason, isHidden: rec.isHidden ?? true };
+        const existing = await getWork(workId);
+        existing ? updated++ : created++;
+        await putWork(toPut);
+      }
+
+      alert(`Import complete.\nCreated: ${created}\nUpdated: ${updated}\nSkipped: ${skipped}`);
+
+      if (confirm('Reload now to apply hides on this page?')) location.reload();
+
+    } catch (e) {
+      console.error('[AO3H] import failed', e);
+      alert('Import failed. See console for details.');
+    }
   }
 
-  // Public page-level helpers for menu dialogs (now bound to IDB)
-  function openFilePickerAndImport(){
+  function promptImportHiddenWorks() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'application/json,.json';
-    input.style.display = 'none';
-    input.addEventListener('change', async () => {
-      const file = input.files && input.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const { added, updated, total } = await importHiddenWorksIDBFromJSON(reader.result);
-        alert(`Imported: +${added} added, ${updated} updated. Total hidden in DB: ${total}.`);
-        input.remove();
-      };
-      reader.readAsText(file);
-    }, { once:true });
-    (document.body || document.documentElement).appendChild(input);
+    input.accept = 'application/json';
+    input.addEventListener('change', () => {
+      if (input.files && input.files[0]) importHiddenWorksFromFile(input.files[0]);
+    }, { once: true });
     input.click();
   }
 
-  // Expose to PAGE for the menu dialog (overwrites previous localStorage-based versions)
-  W.ao3hExportHiddenWorks = exportHiddenWorksIDB;
-  W.ao3hImportHiddenWorks = openFilePickerAndImport;
-
-  // Optional: manual refresh hook
-  W.ao3hRefreshHiddenWorks = async function(){
-    await refreshCache();
-    applyStoredHides();
-  };
-
-  // One-time legacy migration (if old key exists with data)
-  async function migrateLegacyOnce(){
-    let legacy = safeReadLegacy();
-    if (!legacy || (Array.isArray(legacy) && legacy.length===0)) return;
-    const before = Array.isArray(legacy) ? legacy.length : 1;
-    const { added, updated } = await importHiddenWorksIDBFromJSON(legacy);
-    // On peut vider la clé legacy si migration utile
-    if (added || updated) {
-      try { safeWriteLegacy([]); } catch {}
-      console.info(`[AO3H][HFN] Migrated ${before} legacy entries -> IDB (+${added} / upd ${updated}).`);
-    }
-  }
+  W.ao3hImportHiddenWorks = promptImportHiddenWorks;
 
   /* ------------------------------- Lifecycle ------------------------------ */
-  async function start(){
-    active = true;
-
-    // restaurer temp-show
-    tempShow = loadTempShow();
-
-    await openDB();
-    await migrateLegacyOnce(); // migration silencieuse
-    await refreshCache();
-    enhanceListOnce();
-
-    // SINGLE guarded click handler
-    clickHandler = guarded(async (e)=>{
-      // ---- Hide button on blurb header ----
-      const hideBtn = e.target?.closest?.('.' + NS + '-hide-btn');
-      if (hideBtn){
-        const blurb = hideBtn.closest('li.blurb') || hideBtn.closest('.blurb') || hideBtn.closest('li');
-        const id = getWorkIdFromBlurb(blurb);
-        if (!blurb || !id) return;
-
-        try{
-          const existing = hiddenCache.get(id);
-
-          // 1) If it was temp-shown (or visible but marked hidden), re-hide with existing note — no picker.
-          const wasTempShown = existing?.isHidden && tempShow.has(id);
-          const isVisibleButShouldBeHidden = existing?.isHidden && !blurb.querySelector('.' + NS + '-hidebar');
-          if (wasTempShown || isVisibleButShouldBeHidden){
-            tempShow.delete(id); saveTempShow();
-            const reason = existing?.reason || '';
-            hideWork(blurb, reason);
-            await put({ workId:id, reason:String(reason), isHidden:true });
-            hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
-            return;
-          }
-
-          // 2) Quick toggle — any modifier key skips the picker.
-          const quick = e.shiftKey || e.altKey || e.ctrlKey || e.metaKey;
-          if (quick){
-            tempShow.delete(id); saveTempShow();
-            const reason = existing?.reason || '';
-            hideWork(blurb, reason);
-            await put({ workId:id, reason:String(reason), isHidden:true });
-            hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:true });
-            return;
-          }
-
-          // 3) Default: open the picker (new hide or edit note).
-          const picked = await pickReason(existing?.reason || '');
-          if (picked == null) return;
-          if (!blurb.isConnected) return; // re-check after await
-
-          tempShow.delete(id); saveTempShow();
-          hideWork(blurb, picked);
-          await put({ workId:id, reason:String(picked), isHidden:true });
-          hiddenCache.set(id, { workId:id, reason:String(picked), isHidden:true });
-        }catch(err){
-          console.error('[AO3H][HFN] hide click failed', err);
-        }
+  // Legacy migration: localStorage -> IndexedDB (ignore malformed values gracefully)
+  async function transferFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem('ao3HiddenWorks');
+      if (!raw) return;
+      let legacy = {};
+      try {
+        legacy = JSON.parse(raw);
+      } catch {
+        // Handle accidental "[object Object]" or other junk without throwing UI errors
+        console.warn('[AO3H] legacy store invalid JSON; skipping migration');
+        localStorage.removeItem('ao3HiddenWorks');
         return;
       }
-
-      // ---- Actions inside the hide bar ----
-      const bar = e.target?.closest?.('.' + NS + '-hidebar');
-      if (!bar) return;
-
-      const blurb = bar.closest('li.blurb') || bar.closest('.blurb') || bar.closest('li');
-      const id = getWorkIdFromBlurb(blurb);
-      if (!blurb || !id) return;
-
-      if (e.target.classList.contains('show')){
-        showWork(blurb);
-        tempShow.add(id); saveTempShow();
-        return;
+      const keys = Object.keys(legacy || {});
+      if (!keys.length) return;
+      if (!db) await openDB();
+      for (const workId of keys) {
+        const reason = legacy[workId];
+        const existing = await getWork(workId);
+        if (!existing) await putWork({ workId, reason, isHidden: true });
       }
+      localStorage.removeItem('ao3HiddenWorks');
+    } catch (e) { console.warn('[AO3H] legacy transfer skipped', e); }
+  }
 
-      if (e.target.classList.contains('unhide')){
-        if (!confirm('Unhide this work permanently? (Note will be kept)')) return;
-        if (!blurb.isConnected) return;
-
-        showWork(blurb);
-        tempShow.delete(id); saveTempShow();
-        const rec = hiddenCache.get(id);
-        const reason = rec?.reason || bar.querySelector('.reason')?.textContent || '';
-        await put({ workId:id, reason:String(reason), isHidden:false });
-        hiddenCache.set(id, { workId:id, reason:String(reason), isHidden:false });
-        return;
-      }
-
-      if (e.target.classList.contains('edit')){
-        const current = bar.querySelector('.reason')?.textContent || '';
-        const next = await pickReason(current);
-        if (next == null) return;
-
-        if (!blurb.isConnected) return;
-        const barNow = blurb.querySelector('.' + NS + '-hidebar');
-        if (!barNow) return;
-
-        barNow.querySelector('.reason').textContent = String(next);
-        await put({ workId:id, reason:String(next), isHidden:true });
-        hiddenCache.set(id, { workId:id, reason:String(next), isHidden:true });
-        return;
-      }
+  async function initialPass() {
+    const $ = (W.jQuery || W.$);
+    $('ol.index li.blurb').each((_, el) => {
+      const $b = $(el);
+      ensureHideButton($b);
     });
 
-    document.addEventListener('click', clickHandler, false);
-
-    mo = observe(document.body, ()=> enhance());
-    navEvtHandler = guarded(()=> enhance());
-    document.addEventListener(`${NS}:navigated`, navEvtHandler);
-    if (AO3H.bus?.on){
-      const fn = guarded(()=> enhance());
-      AO3H.bus.on('navigated', fn);
-      busUnsub = ()=> { try{ AO3H.bus.off?.('navigated', fn); }catch{} };
-    }
+    // Re-apply persisted hidden state
+    const all = await getAllWorks();
+    $('ol.index li.blurb').each((_, el) => {
+      const $b = $(el);
+      const id = workIdFromBlurb($b);
+      const rec = all.find(r => r.workId === id);
+      if (rec && rec.isHidden) hideWork(el, rec.reason || '');
+    });
   }
 
-  function stop(){
-    active = false;
+  // Delegated events (one-time wire)
+  let delegatesWired = false;
+  function wireDelegatesOnce(){
+    if (delegatesWired) return;
+    const $doc = (W.jQuery || W.$)(document);
 
-    try { document.removeEventListener('click', clickHandler, false); } catch {}
-    clickHandler = null;
+    $doc.on('click', `.${NS}-m5-hidebar .show`, async function () {
+      const blurbEl = (W.jQuery || W.$)(this).closest('li')[0];
+      if (!blurbEl) return;
+      // Temporary reveal; DB unchanged
+      showWork(blurbEl);
+    });
 
-    try { document.removeEventListener(`${NS}:navigated`, navEvtHandler); } catch {}
-    navEvtHandler = null;
+    $doc.on('click', `.${NS}-m5-hidebar .unhide`, async function () {
+      const $b = (W.jQuery || W.$)(this).closest('li');
+      const blurbEl = $b[0];
+      if (!blurbEl) return;
+      const id = workIdFromBlurb($b);
+      if (!id) return;
+      if (!confirm('Unhide this work permanently (until you hide it again)?')) return;
+      showWork(blurbEl);
+      try {
+        const rec = (await getWork(id)) || { workId: id };
+        rec.isHidden = false;
+        await putWork(rec);
+      } catch (e) { console.error('[AO3H] unhide failed', e); }
+    });
 
-    try { mo?.disconnect?.(); } catch {}
-    mo = null;
+    $doc.on('click', `.${NS}-m5-hidebar .edit-reason`, async function () {
+      const $b = (W.jQuery || W.$)(this).closest('li');
+      const blurbEl = $b[0];
+      if (!blurbEl) return;
+      const id = workIdFromBlurb($b);
+      const $reason = (W.jQuery || W.$)(this).closest(`.${NS}-m5-hidebar`).find('.reason-text');
+      const current = $reason.text();
+      const nextPicked = await pickReasonCenteredMinimal(current || '');
+      if (nextPicked === null) return; // cancelled
+      const next = String(nextPicked).trim();
+      if (!next) return;
+      $reason.text(next);
+      try {
+        const rec = (await getWork(id)) || { workId: id };
+        rec.reason = next;
+        rec.isHidden = true;
+        await putWork(rec);
+      } catch (e) { console.error('[AO3H] edit failed', e); }
+    });
 
-    try { busUnsub?.(); } catch {}
-    busUnsub = null;
-
-    try { enhance.cancel?.(); } catch {}
-
-    clearTempShow();
-    unhideAllOnPage();
-    removeHideButtons();
+    delegatesWired = true;
   }
 
-  /* --------------------------- Module registration ------------------------ */
-  function register(){
-    if (AO3H.modules && typeof AO3H.modules.register === 'function') {
-      AO3H.modules.register(MOD_ID, { title: 'Hide fanfic (with notes)', enabledByDefault: true }, async ()=>{
-        onReady(start);
-        return () => stop();
-      });
-    } else {
-      AO3H.register?.({
-        id: MOD_ID,
-        title: 'Hide fanfic (with notes)',
-        defaultFlagKey: 'hideFanficWithNotes',
-        init: async ({ enabled }) => { if (enabled) onReady(start); return ()=>stop(); },
-        onFlagsUpdated: async ({ enabled }) => { enabled ? start() : stop(); },
-      });
-    }
-
-    try {
-      AO3H.flags?.watch?.(FLAG_CAN, v => { v ? onReady(start) : stop(); });
-      if (FLAG_ALT !== FLAG_CAN) AO3H.flags?.watch?.(FLAG_ALT, v => { v ? onReady(start) : stop(); });
-    } catch {}
+  // Auto-observe list updates (AJAX pagination, filters, etc.)
+  function observeList(){
+    const root = document.querySelector('ol.index');
+    if (!root || !observe) return;
+    observe(root, { childList:true, subtree:true }, () => {
+      const $ = (W.jQuery || W.$);
+      $('ol.index li.blurb').each((_, el) => ensureHideButton($(el)));
+    });
   }
 
-  register();
+  async function init() {
+    if (!/\/works\b/.test(location.pathname)) return;
+    if (!W.jQuery && !W.$) { console.error('[AO3H] jQuery not found on page'); return; }
 
+    if (!db) await openDB();
+    await transferFromLocalStorage();
+
+    wireDelegatesOnce();
+    await initialPass();
+    observeList();
+  }
+
+  // Register for AO3H (if present) or run standalone on ready
+  if (AO3H.modules && AO3H.modules.register) {
+    AO3H.modules.register(MOD_ID, { title: 'Hide Fanfic (with notes)', enabledByDefault: true }, init);
+  } else {
+    // Fallback: run immediately when DOM is ready
+    const ready = onReady || ((fn)=>document.readyState!=='loading'?fn():document.addEventListener('DOMContentLoaded',fn));
+    ready(init);
+  }
 })();
