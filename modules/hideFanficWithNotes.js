@@ -1,6 +1,7 @@
 /* modules/hideFanficWithNotes.js — hide works with user notes (IndexedDB + note picker)
    Live-toggle safe, legacy-safe cleanup, CANCELABLE debounce, TEMP-SHOW allowlist,
-   proper import/export to IndexedDB, and compatibility with HideByTags fold/cut. */
+   proper import/export to IndexedDB, compatibility with HideByTags fold/cut,
+   and DOM-cached reason so Hide→Show→Hide reuses the original note instantly. */
 
 ;(function(){
   'use strict';
@@ -21,7 +22,7 @@
   if (css) css`
     /* Hide bar attached inside a blurb (unique class to avoid collisions) */
     .${NS}-m5-hidebar{
-      display:flex; align-items:center; justify-content:space-between;
+      display:flex; align-items:flex-start; justify-content:space-between;
       gap:10px;
       padding:6px 10px; background:#f5f6f8; border:1px solid #d7dbe3; border-radius:8px;
       margin:.5em 0;
@@ -29,23 +30,19 @@
       color:#1b2430;
     }
     .${NS}-m5-hidebar .left{
-      display:flex; gap:.5em; align-items:center; min-width:0; padding-top: 4px;
+      display:flex; gap:.5em; align-items:flex-start; min-width:0; padding-top: 4px;
     }
     .${NS}-m5-hidebar .label{ opacity:.8 }
+
     /* Let long notes show fully (wrap, keep newlines), and break very long tokens/URLs */
-.${NS}-m5-hidebar .reason-text{
-  font-weight:600;
-  white-space:pre-wrap;    /* allow wrapping + respect \n */
-  overflow:visible;        /* no clipping */
-  text-overflow:clip;      /* no ellipsis */
-  max-width:none;          /* no width cap */
-  word-break:break-word;   /* wrap long URLs/strings */
-}
-
-/* (Optional) make multi-line notes align nicely in the bar */
-.${NS}-m5-hidebar{ align-items:flex-start; }
-.${NS}-m5-hidebar .left{ align-items:flex-start; }
-
+    .${NS}-m5-hidebar .reason-text{
+      font-weight:600;
+      white-space:pre-wrap;    /* allow wrapping + respect \n */
+      overflow:visible;        /* no clipping */
+      text-overflow:clip;      /* no ellipsis */
+      max-width:none;          /* no width cap */
+      word-break:break-word;   /* wrap long URLs/strings */
+    }
 
     .${NS}-m5-hidebar .right{ display:flex; gap:6px; }
     .${NS}-m5-btn{
@@ -137,10 +134,15 @@
   // jQuery is available on AO3; use the page copy.
   function $(sel, root){ return (W.jQuery || W.$)(sel, root); }
 
+  // Compute a stable ID and cache it on the blurb to avoid any mismatch later.
   function workIdFromBlurb($blurb) {
+    const el = $blurb[0];
+    if (!el) return '';
+    if (el.dataset.ao3hWorkid) return el.dataset.ao3hWorkid;
     const href = $blurb.find('.header .heading a:first').attr('href') || '';
-    // Normalize to a stable ID (strip query/hash)
-    return href.replace(/(#.*|\?.*)$/, '');
+    const id = href.replace(/(#.*|\?.*)$/, ''); // strip query/hash
+    el.dataset.ao3hWorkid = id;
+    return id;
   }
 
   /* --------------------------- Quick-note picker -------------------------- */
@@ -236,29 +238,43 @@
     btn.className = `${NS}-m5-hide-btn`;
     $header.append(btn);
 
-    // ===== CHANGE: auto-restore prior note on Hide if one exists =====
+    // ===== Auto-restore prior note on Hide if one exists =====
     btn.addEventListener('click', async () => {
       const workId = workIdFromBlurb($blurb);
       if (!workId) return;
       try {
-        const existing = await getWork(workId);
-
-        // If we already have a saved reason (non-empty), skip the picker
-        if (existing && typeof existing.reason === 'string' && existing.reason.trim()) {
-          const reason = existing.reason.trim();
-          hideWork($blurb[0], reason);
-          await putWork({ workId, reason, isHidden: true });
+        // 1) Prefer DOM-cached reason (fast, never races DB)
+        const domReason = ($blurb[0].dataset.ao3hReason || '').trim();
+        if (domReason) {
+          hideWork($blurb[0], domReason);
+          // keep DB in sync
+          if (db) await putWork({ workId, reason: domReason, isHidden: true });
           return;
         }
 
-        // First-time hide (no saved note yet): ask once
-        let reason = await pickReasonCenteredMinimal('');
-        if (reason === null) return; // cancelled
-        reason = String(reason).trim();
-        if (!reason) return;
+        // 2) Fallback: load from DB
+        let reason = '';
+        if (db) {
+          const existing = await getWork(workId);
+          if (existing && typeof existing.reason === 'string') {
+            reason = existing.reason.trim();
+          }
+        }
 
-        hideWork($blurb[0], reason);
-        await putWork({ workId, reason, isHidden: true });
+        if (reason) {
+          hideWork($blurb[0], reason);
+          if (db) await putWork({ workId, reason, isHidden: true });
+          return;
+        }
+
+        // 3) First-time hide → ask once
+        let picked = await pickReasonCenteredMinimal('');
+        if (picked === null) return; // cancelled
+        picked = String(picked).trim();
+        if (!picked) return;
+
+        hideWork($blurb[0], picked);
+        if (db) await putWork({ workId, reason: picked, isHidden: true });
       } catch (e) { console.error('[AO3H] hide click failed', e); }
     });
   }
@@ -266,6 +282,10 @@
   function hideWork(blurbEl, reason) {
     const $blurb = $(blurbEl);
     if ($blurb.find(`.${NS}-m5-hidebar`).length) return;
+
+    // Cache reason + hidden state on the DOM itself (for instant re-hide)
+    blurbEl.dataset.ao3hReason = String(reason || '');
+    blurbEl.dataset.ao3hHidden = '1';
 
     // Build bar
     const bar = document.createElement('div');
@@ -284,7 +304,6 @@
     bar.querySelector('.reason-text').textContent = reason;
 
     // Hide original blurb content (except our bar)
-    // Keep the container height stable by hiding siblings
     const children = Array.from(blurbEl.children);
     for (const ch of children) {
       if (ch !== bar) ch.style.display = 'none';
@@ -304,6 +323,8 @@
     $blurb.find(`.${NS}-m5-hidebar`).remove();
     // Re-show the Hide button
     $blurb.find(`.${NS}-m5-hide-btn`).show();
+    // Keep the reason so a second Hide is instant
+    blurbEl.dataset.ao3hHidden = '0';
   }
 
   /* ----------------------------- Import/Export ---------------------------- */
@@ -416,13 +437,18 @@
       ensureHideButton($b);
     });
 
-    // Re-apply persisted hidden state
+    // Re-apply persisted hidden state (and seed DOM cache for instant re-hide)
     const all = await getAllWorks();
     $('ol.index li.blurb').each((_, el) => {
       const $b = $(el);
       const id = workIdFromBlurb($b);
       const rec = all.find(r => r.workId === id);
-      if (rec && rec.isHidden) hideWork(el, rec.reason || '');
+      if (rec && rec.isHidden) {
+        // seed cache before we hide
+        el.dataset.ao3hReason = String(rec.reason || '');
+        el.dataset.ao3hHidden = '1';
+        hideWork(el, rec.reason || '');
+      }
     });
   }
 
@@ -435,7 +461,7 @@
     $doc.on('click', `.${NS}-m5-hidebar .show`, async function () {
       const blurbEl = (W.jQuery || W.$)(this).closest('li')[0];
       if (!blurbEl) return;
-      // Temporary reveal; DB unchanged
+      // Temporary reveal; DB unchanged; DOM still keeps the reason for instant re-hide
       showWork(blurbEl);
     });
 
@@ -448,7 +474,7 @@
       if (!confirm('Unhide this work permanently (until you hide it again)?')) return;
       showWork(blurbEl);
       try {
-        const rec = (await getWork(id)) || { workId: id };
+        const rec = (await getWork(id)) || { workId: id, reason: (blurbEl.dataset.ao3hReason || '') };
         rec.isHidden = false;
         await putWork(rec);
       } catch (e) { console.error('[AO3H] unhide failed', e); }
@@ -466,6 +492,8 @@
       const next = String(nextPicked).trim();
       if (!next) return;
       $reason.text(next);
+      // update DOM cache + DB
+      blurbEl.dataset.ao3hReason = next;
       try {
         const rec = (await getWork(id)) || { workId: id };
         rec.reason = next;
