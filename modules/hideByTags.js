@@ -1,8 +1,10 @@
 /* modules/hideByTags.js — Hide works by matching tag list (with groups + manager) */
+
 ;(function(){
   'use strict';
 
   // --- AO3H bindings / utils ---
+// --- AO3H bindings / utils ---
   const AO3H = window.AO3H || {};
   const { $, $$, onReady, observe, css, debounce } = AO3H.util || {};
   const Storage = AO3H.store;
@@ -57,6 +59,27 @@
     try { return base.replace(/\p{Diacritic}/gu,''); }
     catch { return base.replace(/[\u0300-\u036f]/g,''); }
   };
+
+  function escapeHtml(s){
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
+
+  // get workId (normalized to pure number string) from a blurb
+  function getWorkIdFromBlurb(blurb){
+    if (!blurb || typeof blurb.querySelectorAll !== 'function') return null;
+    const candidates = blurb.querySelectorAll('.header .heading a, .header a, a[href*="/works/"]');
+    for (const a of candidates){
+      const href = a.getAttribute('href') || '';
+      if (/\/works\/\d+/.test(href)) {
+        const m = href.replace(/(#.*|\?.*)$/,'').match(/\/works\/(\d+)/);
+        return m ? m[1] : null; // return just "123456"
+      }
+    }
+    return null;
+  }
 
   async function getHidden(){
     let list = (await Storage.get(TM_KEY, [])) || [];
@@ -150,6 +173,14 @@
   user-select: none;
   touch-action: manipulation;
 }
+.${NS}-fold.${NS}-disabled {
+cursor: default;
+background: #f7f7f7;
+border-style: solid;
+}
+.${NS}-fold.${NS}-disabled:hover { background: #f7f7f7; }
+.${NS}-fold.${NS}-disabled .${NS}-hint { opacity:.55; }
+
 .${NS}-fold * { pointer-events: none; }
 .${NS}-fold:hover { background:#f1f3f7; }
 .${NS}-fold:focus { outline:2px solid #7aa7ff; outline-offset:2px; }
@@ -168,39 +199,40 @@
 .${NS}-force-show { display:list-item !important; }
 
 /* ===================== INLINE HIDE ICON ===================== */
-/* Par défaut */
 a.tag.${NS}-tag-wrap{
   position: relative;
-  padding-right: 0;                 /* aucun espace quand pas survolé */
-  overflow: visible;                /* icône reste visible quand montrée */
-  transition: padding-right .12s;  
+  padding-right: 0;
+  overflow: visible;
+  transition: padding-right .12s;
 }
-
-/* Au hover/focus: on AJOUTE espace qui va CONTENIR icône */
 a.tag.${NS}-tag-wrap:hover,
 a.tag.${NS}-tag-wrap:focus-visible,
 ul.commas li:hover > a.tag.${NS}-tag-wrap,
 ol.commas li:hover > a.tag.${NS}-tag-wrap,
 .commas   li:hover > a.tag.${NS}-tag-wrap{
-  padding-right: 1.4em;             
+  padding-right: 0.8em;
 }
-
-/* Icône est DEDANS le lien (dans espace ajouté) */
 .${NS}-hide-ico{
   position: absolute;
-  right: .2em;                      /* bord droit du lien (dans le padding) */
+  right: -0.1em;
   top: 50%;
   transform: translateY(-50%);
   width: 1em; height: 1em; line-height: 1em;
   text-align: center; font-size: .9em;
-  border: 1px solid #bbb; border-radius: 50%;
-  background: #fff;
-  opacity: 0; pointer-events: none; /* invisible et non cliquable par défaut */
+  border: none; border-radius: 50%;
+  background: transparent;
+  opacity: 0; pointer-events: none;
   transition: opacity .15s, transform .15s;
   z-index: 2;
 }
-
-/* Icône cliquable juste quand est visible */
+/* Hide our injected comma only when the icon would be visible */
+a.tag.${NS}-tag-wrap:hover .${NS}-tag-comma,
+a.tag.${NS}-tag-wrap:focus-visible .${NS}-tag-comma,
+ul.commas li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma,
+ol.commas li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma,
+.commas   li:hover > a.tag.${NS}-tag-wrap .${NS}-tag-comma{
+  display: none;
+}
 a.tag.${NS}-tag-wrap:hover .${NS}-hide-ico,
 a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
   opacity: 1; pointer-events: auto;
@@ -208,54 +240,30 @@ a.tag.${NS}-tag-wrap:focus-visible .${NS}-hide-ico{
 .${NS}-hide-ico:hover{
   transform: translateY(-50%) scale(1.06);
 }
-
-/* Empêche la virgule orpheline (reste collée au tag) */
 ul.commas li,
 ol.commas li,
-.commas li{
-  white-space: nowrap;
-}
-
-/* ——— Réduire la taille du texte des tags (et des virgules AO3) ——— */
+.commas li{ white-space: nowrap; }
 ul.commas li > a.tag.${NS}-tag-wrap,
 ol.commas li > a.tag.${NS}-tag-wrap,
 .commas   li > a.tag.${NS}-tag-wrap{
-  font-size: 0.92em;      /* ← ajuste: 0.85  0.98 selon tes goûts */
-  line-height: 1.15;      /* un peu plus serré (optionnel) */
+  font-size: 0.92em; line-height: 1.15;
 }
-
-/* Assortir la taille des virgules générées par AO3 */
 ul.commas li::after,
 ol.commas li::after,
-.commas   li::after{
-  font-size: 0.92em;      /* doit matcher la valeur au-dessus */
-}
-
-/* (optionnel) Icône suit la taille du tag */
-a.tag.${NS}-tag-wrap .${NS}-hide-ico{
-  font-size: 0.9em;       /* relatif au tag, ajuste si besoin */
-}
+.commas   li::after{ font-size: 0.92em; }
+a.tag.${NS}-tag-wrap .${NS}-hide-ico{ font-size: 0.9em; }
 
 /* ===================== MANAGER PANEL (ULTRA-LIGHT) ===================== */
 .${NS}-mgr-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:999998; }
 .${NS}-mgr {
-  position:fixed;
-  top:10vh; left:50%; transform:translateX(-50%);
-  background:#fff; color:#000;
-  border:1px solid #e5e7eb; 
-  padding:10px; z-index:999999;
-  box-shadow:0 16px 40px rgba(2,15,35,.12);
-  font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  position:fixed; top:10vh; left:50%; transform:translateX(-50%);
+  background:#fff; color:#000; border:1px solid #e5e7eb; padding:10px;
+  z-index:999999; box-shadow:0 16px 40px rgba(2,15,35,.12);
+  font: 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   display:grid; gap:8px; max-height: 60vh; max-width: 70vh; overflow: auto;
 }
-.${NS}-mgr h3 {
-  margin: .2rem 0 .4rem;
-  font-size: 1rem;
-  text-align: center;          /* centers the title text */
-}
+.${NS}-mgr h3 { margin:.2rem 0 .4rem; font-size:1rem; text-align:center; }
 
-
-/* Head: search + count */
 .${NS}-ul-head { display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
 .${NS}-ul-search {
   border-radius: 8px; border:1px solid #cfd6e4; background:#fff;
@@ -263,7 +271,6 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 }
 .${NS}-ul-count { font-weight:600; font-size:10px; color:#4b5563; }
 
-/* Actions */
 .${NS}-ul-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .${NS}-ul-btn {
   height: 25px; padding: 0 10px;
@@ -272,25 +279,19 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 }
 .${NS}-ul-btn:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
 
-/* List area */
 .${NS}-ul-list { display:grid; gap:8px; max-height:none; overflow:visible; padding-right:2px; }
 
-/* ===================== EXPANDABLE GROUPS ===================== */
 .${NS}-ul-group {
   border: 1px solid #e6e8ee; background: #fff; border-radius: 10px; margin-bottom: 8px;
   display: flex; flex-direction: column; min-height: 25px;
 }
 .${NS}-ul-ghead {
-  display:inline; align-items:center; gap:8px; height:25px; padding:3px;
+  display:flex; align-items:center; gap:8px; height:25px; padding:3px;
   background:transparent; border:none; cursor:pointer; user-select:none;
 }
-.${NS}-ul-ghead:hover { background: rgba(0,0,0,.04); }
 .${NS}-ul-ghead:focus-visible { outline: 2px solid #7aa7ff; outline-offset: 2px; }
 
-.${NS}-ul-chevron {
-  display:inline-block; width:10px; min-width:10px; height:10px;
-  transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px;
-}
+.${NS}-ul-chevron { display:inline-block; width:10px; min-width:10px; height:10px; transform-origin:50% 50%; transition: transform .18s ease; margin-left:10px; }
 .${NS}-ul-group[aria-expanded="true"] .${NS}-ul-chevron { transform: rotate(90deg); }
 
 .${NS}-ul-glabel {
@@ -298,7 +299,6 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:-8px; margin-left:-15px;
 }
 
-/* Collapsible content */
 .${NS}-ul-gwrap {
   overflow:hidden; max-height:0;
   transition:max-height .22s ease, padding-top .22s ease, margin-top .22s ease, border-color .22s ease;
@@ -307,7 +307,6 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
   max-height:1200px; border-top: 1px dashed #e7ebf5;
 }
 
-/* Rows */
 .${NS}-ul-gwrap { display:grid; gap:6px; }
 .${NS}-ul-row {
   display:grid; grid-template-columns: 1fr auto auto; gap:8px;
@@ -316,14 +315,12 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 }
 .${NS}-ul-row:hover { background:#fafbfe; border-color:#e7ebf5; }
 
-/* Tag pill */
 .${NS}-ul-tag {
-  display:flex; max-width:100%; align-items: center;
+  display:inline-block; max-width:100%;
   padding:4px 10px; border-radius:999px; background:#f6f7fb; border:1px solid #dfe4f0;
   font-size:10px; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
-/* Buttons */
 .${NS}-ul-gbtn, .${NS}-ul-del {
   display:flex; align-items:center; justify-content:center;
   height:26px; min-width:30px; padding:0 10px;
@@ -331,11 +328,9 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
   transition: background .15s, transform .12s, border-color .15s;
 }
 .${NS}-ul-gbtn:hover, .${NS}-ul-del:hover { background:#ecf1f8; border-color:#b8c3d8; transform: translateY(-1px); }
-.${NS}-ul-gbtn:focus-visible, .${NS}-ul-del:focus-visible { outline:2px solid #7aa7ff; outline-offset:2px; }
 .${NS}-ul-del { background:#fff6f6; border-color:#f2c9c9; }
 .${NS}-ul-del:hover { background:#ffecec; border-color:#e9b3b3; }
 
-/* ===================== TOAST ===================== */
 .${NS}-toast {
   position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
   background: rgba(0,0,0,.75); color: #fff;
@@ -344,7 +339,6 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
   opacity: 0; transition: opacity .15s ease; pointer-events: none;
 }
 
-/* ===================== MINI GROUP PICKER ===================== */
 .${NS}-gp-pop {
   position: absolute; z-index: 1000000;
   min-width: 180px; max-width: 260px; max-height: 50vh; overflow: auto;
@@ -366,22 +360,14 @@ a.tag.${NS}-tag-wrap .${NS}-hide-ico{
 }
 .${NS}-gp-btn:hover { background:#e9ecf0; }
 
-/* ===================== RESPONSIVE ===================== */
 @media (max-width: 720px){
   .${NS}-ul-head { grid-template-columns: 1fr; }
   .${NS}-ul-actions { justify-content:flex-start; }
 }
 
-/* === AO3 commas: notre gestion, pour éviter la virgule orpheline === */
-
-/* 0) désactiver la virgule générée par AO3 UNIQUEMENT là où on gère nous-mêmes */
+/* AO3 commas control */
 .${NS}-own-commas li::after { content: "" !important; }
-
-/* 1) la virgule que nous insérons dans le <a> */
-a.tag.${NS}-tag-wrap .${NS}-tag-comma {
-  text-decoration: none; /* pas soulignée */
-  margin-right: .35em;   /* espace après la virgule */
-}
+a.tag.${NS}-tag-wrap .${NS}-tag-comma { text-decoration: none; margin-right: .35em; }
   `;
 
   function forceShow(el){
@@ -392,10 +378,38 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
     }catch{}
   }
 
-  function updateFoldContent(fold, reasons, isExpanded){
+  
+  /* -------------------- Notes integration (event + DOM fallback) -------------------- */
+  // Keep track of work IDs hidden by notes
+  const hiddenByNotes = new Set();
+
+  // Event API (dispatch these from the notes module):
+  // document.dispatchEvent(new CustomEvent(`${NS}:notes-hidden`,  { detail:{ workId } }));
+  // document.dispatchEvent(new CustomEvent(`${NS}:notes-visible`, { detail:{ workId } }));
+  document.addEventListener(`${NS}:notes-hidden`,  (e)=>{
+    const id = e?.detail?.workId;
+    if (id) { hiddenByNotes.add(id); processList(); }
+  });
+  document.addEventListener(`${NS}:notes-visible`, (e)=>{
+    const id = e?.detail?.workId;
+    if (id) { hiddenByNotes.delete(id); processList(); }
+  });
+  
+
+  function isHiddenByNotes(blurb){
+    // Preferred: event-tracked set
+    const id = getWorkIdFromBlurb(blurb);
+    if (id && hiddenByNotes.has(id)) return true;
+    // Fallback: DOM marker the notes module can set/unset
+    // e.g. blurb.setAttribute('data-ao3h-notes-hidden','1') while hidden by notes
+    return blurb.hasAttribute('data-ao3h-notes-hidden');
+  }
+
+  function updateFoldContent(fold, reasons, isExpanded, notesLock){
     fold.innerHTML = '';
     const note = document.createElement('span');
     note.className = `${NS}-note`;
+    // Message stays informational if notesLock; otherwise the usual
     note.textContent = isExpanded ? 'ℹ️ This work was hidden.' : 'This work is hidden';
 
     const why = document.createElement('span');
@@ -414,10 +428,20 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
 
     const hint = document.createElement('span');
     hint.className = `${NS}-hint`;
-    hint.textContent = isExpanded ? 'Click to hide' : 'Click to show';
+    if (notesLock) {
+      hint.textContent = 'Hidden by a Note';
+      fold.classList.add(`${NS}-disabled`);
+      fold.setAttribute('aria-disabled','true');
+      // Ensure the banner is visually “closed”, because you can’t toggle it here
+      fold.setAttribute('aria-expanded','false');
+    } else {
+      hint.textContent = isExpanded ? 'Click to hide' : 'Click to show';
+      fold.classList.remove(`${NS}-disabled`);
+      fold.removeAttribute('aria-disabled');
+    }
 
     fold.dataset.reasons = reasons.join('|');
-    fold.setAttribute('aria-expanded', String(!!isExpanded));
+    if (!notesLock) fold.setAttribute('aria-expanded', String(!!isExpanded));
     fold.append(note, document.createTextNode(' '), why, hint);
   }
 
@@ -444,10 +468,23 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
     blurb.insertBefore(fold, cut);
 
     const doToggle = () => {
+      // If notes own the hide, do nothing.
+      if (fold.classList.contains(`${NS}-disabled`) || fold.getAttribute('aria-disabled') === 'true') return;
       const nowExpanded = fold.getAttribute('aria-expanded') !== 'true';
       fold.setAttribute('aria-expanded', String(nowExpanded));
       const reasons = (fold.dataset.reasons || '').split('|').filter(Boolean);
-      updateFoldContent(fold, reasons, nowExpanded);
+      updateFoldContent(fold, reasons, nowExpanded, /*notesLock*/false);
+
+      // notify other modules (e.g., notes) that this work became visible
+      if (nowExpanded) {
+        try {
+          const workId = getWorkIdFromBlurb(blurb);
+          if (workId) {
+            const evt = new CustomEvent(`${NS}:work-visible`, { detail: { workId } });
+            document.dispatchEvent(evt);
+          }
+        } catch {}
+      }
     };
     fold.addEventListener('pointerdown', (e)=>{ e.preventDefault(); e.stopPropagation(); doToggle(); });
     fold.addEventListener('keydown', (e)=>{ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doToggle(); } });
@@ -457,10 +494,23 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
 
   function wrapWork(blurb, reasons){
     const { fold } = ensureWrapped(blurb);
-    const isExpanded = fold.getAttribute('aria-expanded') === 'true';
-    updateFoldContent(fold, reasons, isExpanded);
+    const notesLock = isHiddenByNotes(blurb);
+    // If notesLock is true, we render an inert banner (no click)
+    // Otherwise, normal behavior with expand/collapse.
+    const isExpanded = (!notesLock) && (fold.getAttribute('aria-expanded') === 'true');
+    if (notesLock) {
+      // make sure role/tabindex don’t advertise interactivity
+      fold.removeAttribute('role');
+      fold.removeAttribute('tabindex');
+    } else {
+      // ensure interactive attributes are present
+      fold.setAttribute('role','button');
+      fold.setAttribute('tabindex','0');
+    }
+    updateFoldContent(fold, reasons, isExpanded, notesLock);
     forceShow(blurb);
   }
+
   function unwrapWork(blurb){
     const fold = blurb.querySelector(`.${NS}-fold`);
     const cut = blurb.querySelector(`.${NS}-cut`);
@@ -472,6 +522,15 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
     }
     blurb.hidden = false;
     blurb.style && blurb.style.removeProperty && blurb.style.removeProperty('display');
+
+    // visibility broadcast
+    try {
+      const workId = getWorkIdFromBlurb(blurb);
+      if (workId) {
+        const evt = new CustomEvent(`${NS}:work-visible`, { detail: { workId } });
+        document.dispatchEvent(evt);
+      }
+    } catch {}
   }
 
   function ensureInlineIcons(root=document){
@@ -585,17 +644,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
 
   /* --------------------------- Hidden Tags Manager (ULTRA-LIGHT) --------------------------- */
   function openManager(){
-    // Utilitaire: liste triée des noms de groupes (inclut "" = sans groupe)
-    function listGroupNamesFromMap(groupsMap, hidden) {
-      const names = new Set();
-      for (const t of hidden) {
-        const g = (groupsMap[t] || '').trim();
-        if (g) names.add(g); // n’ajoute que si non vide
-      }
-      return [...names].sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
-    }
-
-    // Ferme le popover si on clique dehors ou on presse Esc
     function wireOutsideToClose(pop, onClose) {
       const onDocClick = (e) => { if (!pop.contains(e.target)) { cleanup(); onClose(); } };
       const onKey = (e) => { if (e.key === 'Escape') { cleanup(); onClose(); } };
@@ -605,13 +653,12 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
       return cleanup;
     }
 
-    // Crée/affiche le picker ancré au bouton
     async function openGroupPicker(anchorBtn, currentTag, currentGroup, getHidden, getGroupsMap, setGroupsMap, onApplied) {
       const hidden = await getHidden();
       const map = await getGroupsMap();
-      const groups = listGroupNamesFromMap(map, hidden);
+      const groups = [...new Set(hidden.map(t => (map[t]||'').trim()).filter(Boolean))]
+        .sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
 
-      // popover
       const pop = document.createElement('div');
       pop.className = `${NS}-gp-pop`;
       pop.innerHTML = `
@@ -624,7 +671,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
         </div>
       `;
 
-      // positionnement près du bouton
       const r = anchorBtn.getBoundingClientRect();
       Object.assign(pop.style, {
         left: `${Math.round(window.scrollX + r.left)}px`,
@@ -641,21 +687,22 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
 
       function itemLabel(name){ return name || '(sans groupe)'; }
 
-      // liste des groupes existants
       groups.forEach(name => {
         const row = document.createElement('div');
         row.className = `${NS}-gp-item`;
-        row.innerHTML = `<span>${itemLabel(name)}</span>${name === currentGroup ? '<span>•</span>' : ''}`;
+        row.innerHTML =
+          `<span>${escapeHtml(itemLabel(name))}</span>` +
+          (name === currentGroup ? '<span>•</span>' : '');
+
         row.addEventListener('click', async () => {
           map[currentTag] = String(name || '').trim();
           await setGroupsMap(map);
           pop.remove(); cleanup();
-          onApplied(); // recharger la vue
+          onApplied();
         });
         list.appendChild(row);
       });
 
-      // appliquer un nouveau nom tapé
       btnApply.addEventListener('click', async () => {
         const newName = String(input.value || '').trim();
         map[currentTag] = newName;
@@ -665,7 +712,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
       });
       btnCancel.addEventListener('click', () => { pop.remove(); cleanup(); });
 
-      // UX: Entrée valide, Échap ferme
       input.addEventListener('keydown', async (e) => { if (e.key === 'Enter') { btnApply.click(); } });
       input.focus();
     }
@@ -691,7 +737,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
       <div class="${NS}-ul-list" aria-live="polite"></div>
     `;
 
-    function close(){
+        function close(){
       // 🔓 unlock page scroll
       document.documentElement.classList.remove(`${NS}-lock`);
       document.body.classList.remove(`${NS}-lock`);
@@ -737,12 +783,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
     const $count = box.querySelector(`.${NS}-ul-count`);
     const $list = box.querySelector(`.${NS}-ul-list`);
 
-    function listAllGroupNames(groupsMap, hidden){
-      const names = new Set();
-      for (const t of hidden) names.add((groupsMap[t]||'').trim());
-      return [...names].sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
-    }
-
     let searchTimer = 0;
     function onSearch(cb){
       clearTimeout(searchTimer);
@@ -750,48 +790,40 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
     }
 
     async function reload(){
-      const hidden = await getHidden(); // Array<string> (canonical tags)
-      const groupsMap = await getGroupsMap(); // { tag: groupName }
+      const hidden = await getHidden();
+      const groupsMap = await getGroupsMap();
       const qn = toNorm($search.value || '');
 
-      // Filter by tag text OR by group name
       const filtered = hidden.filter(t =>
         !qn || toNorm(t).includes(qn) || toNorm(groupsMap[t] || '').includes(qn)
       );
 
-      // Build groups map: groupName -> [tags], include "(sans groupe)"
       const grouped = new Map();
       for (const t of filtered) {
-        const g = (groupsMap[t] || '').trim(); // may be empty
-        const key = g ? g : 'sans groupe'; // visible bucket for empty
+        const g = (groupsMap[t] || '').trim();
+        const key = g ? g : 'sans groupe';
         if (!grouped.has(key)) grouped.set(key, []);
         grouped.get(key).push(t);
       }
 
-      // Sort tags A→Z inside each group
       for (const [, arr] of grouped) {
         arr.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
       }
-      // Sort groups A→Z
       const entries = [...grouped.entries()]
         .sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }));
 
-      // Render
       $list.innerHTML = '';
       let shown = 0;
 
-      // Collapsed state storage (read once per reload)
       const collapsedSet = getCollapsedSet();
 
       for (const [gname, tags] of entries) {
         const block = document.createElement('div');
         block.className = `${NS}-ul-group`;
 
-        // Initial expanded/collapsed from storage
         const isCollapsed = collapsedSet.has(gname);
         block.setAttribute('aria-expanded', String(!isCollapsed));
 
-        // --- Header ---
         const head = document.createElement('div');
         head.className = `${NS}-ul-ghead`;
         head.setAttribute('role', 'button');
@@ -808,11 +840,9 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
         head.append(chev, glabel);
         block.append(head);
 
-        // --- Rows wrapper ---
         const wrap = document.createElement('div');
         wrap.className = `${NS}-ul-gwrap`;
 
-        // Set initial inline style to match the state (prevents CSS specificity issues)
         if (isCollapsed) {
           wrap.style.maxHeight = '0px';
           wrap.style.overflow  = 'hidden';
@@ -821,7 +851,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
           wrap.style.overflow  = 'visible';
         }
 
-        // Fill rows
         for (const tag of tags) {
           const row = document.createElement('div');
           row.className = `${NS}-ul-row`;
@@ -849,7 +878,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
           });
 
           const del = document.createElement('button');
-          del.className = `${NS}-ul-btn ${NS}-ul-del}`;
+          del.className = `${NS}-ul-btn ${NS}-ul-del`;
           del.textContent = '🗑️';
           del.title = 'Supprimer ce tag caché';
           del.addEventListener('click', async () => {
@@ -872,7 +901,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
         block.append(wrap);
         $list.append(block);
 
-        // Toggle updates inline styles so collapsed groups open reliably
         function toggleGroup(){
           const expanded = block.getAttribute('aria-expanded') !== 'true';
           block.setAttribute('aria-expanded', String(expanded));
@@ -900,7 +928,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
 
     $search.addEventListener('input', ()=> onSearch(reload));
 
-    // Export/Import TAGS (array)
     box.querySelector('.export').addEventListener('click', async () => {
       const list = await getHidden();
       const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' });
@@ -939,7 +966,6 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
       input.click();
     });
 
-    // Export/Import GROUPS MAP (object)
     box.querySelector('.exportg').addEventListener('click', async () => {
       const map = await getGroupsMap();
       const blob = new Blob([JSON.stringify(map, null, 2)], { type: 'application/json' });
@@ -976,6 +1002,9 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
       input.click();
     });
 
+    // close
+    box.querySelector('.close').addEventListener('click', close);
+
     reload();
   }
   /* ------------------------- /Hidden Tags Manager -------------------------- */
@@ -1009,7 +1038,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
     processList();
   }
 
-  // ---- register with AO3H (replaces the old "return { init }" block) ----
+  // ---- register with AO3H ----
   AO3H.modules.register('HideByTags', { title: 'Hide by tags', enabledByDefault: true }, async function init(){
     const ENABLE_KEY = 'mod:HideByTags:enabled';
     enabled = !!AO3H.flags.get(ENABLE_KEY, true);
@@ -1060,7 +1089,7 @@ a.tag.${NS}-tag-wrap .${NS}-tag-comma {
       }
     });
 
-    // Live-toggle via AO3H flags (replaces `${NS}:flags-updated` custom event)
+    // Live-toggle via AO3H flags
     AO3H.flags.watch(ENABLE_KEY, (val) => {
       const wasEnabled = enabled;
       enabled = !!val;
