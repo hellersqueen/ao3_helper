@@ -2,7 +2,12 @@
    Toast-first ONLY on fresh open; keep native restoration on refresh/back-forward.
    Press Enter to "Resume reading" when the toast is visible.
    Robust registration so it always appears in the AO3 Helper menu.
+
+   Change log (custom):
+   - Auto-clear saved position when user is "near the end" to prevent stale toasts
+     on next fresh open. Triggers at ≥95% or within 120px of the bottom (whichever first).
 */
+
 ;(function () {
   'use strict';
 
@@ -51,6 +56,10 @@
 
   const MOD_ID = 'SaveScroll';
   const TITLE  = 'Save scroll position';
+
+  // ---- Auto-clear thresholds (near-end detection) ----
+  const CLEAR_NEAR_END_RATIO = 0.95; // 95% of scrollable height
+  const CLEAR_NEAR_END_PX    = 120;  // or within 120px of absolute bottom
 
   // ---------- Styles (toast) ----------
   css`
@@ -130,10 +139,25 @@
   const getMaxScroll = () => Math.max(0, (docEl().scrollHeight || 0) - window.innerHeight);
 
   // ---------- Save logic ----------
+  // After we auto-clear for this page, stop saving further to avoid re-saving a near-bottom state.
+  let finishedForThisPage = false;
+
   function snapshotNow() {
+    if (finishedForThisPage) return null;
+
     const y  = getScrollY();
     const mx = getMaxScroll();
     const ratio = mx > 0 ? Math.min(1, Math.max(0, y / mx)) : 0;
+    const fromBottomPx = Math.max(0, mx - y);
+
+    // --- Near-end detection & clear ---
+    if ((ratio >= CLEAR_NEAR_END_RATIO) || (fromBottomPx <= CLEAR_NEAR_END_PX)) {
+      clearState();
+      finishedForThisPage = true; // stop further saves this session for this page
+      log?.info?.('[AO3H]', 'SaveScroll: cleared near end for', key(), { ratio, fromBottomPx });
+      return null;
+    }
+
     const state = {
       y, ratio,
       mx,
@@ -240,6 +264,9 @@
     if (!isWorkOrChapterPath(location.pathname)) return;
     active = true;
 
+    // reset per-page session flag in case we toggled the module
+    finishedForThisPage = false;
+
     const state = readState();
     const qualifies = state && ((state.ratio || 0) > 0.02 || (state.y || 0) > 200);
     const nType = navType();
@@ -281,7 +308,7 @@
 
     scrollSaver  = () => saveThrottled();
     resizeSaver  = () => saveDebounced();
-    beforeUnload = () => { try { snapshotNow(); } catch {} };
+    beforeUnload = () => { try { if (!finishedForThisPage) snapshotNow(); } catch {} };
 
     window.addEventListener('scroll',  scrollSaver, { passive: true });
     window.addEventListener('resize',  resizeSaver, { passive: true });
