@@ -1,0 +1,19 @@
+{
+  "version": "1.0.3",
+  "core": [
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/core.js"
+  ],
+  "menu": [
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/menu.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/menu-grouper.js"
+  ],
+  "modules": [
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/saveScroll.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/chapterWordCount.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideByTags.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideFanficWithNotes.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideDates.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideWordCount.js",
+    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/autoSearchFilters.js"
+  ]
+}
