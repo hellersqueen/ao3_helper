@@ -1,5 +1,5 @@
 {
- "version": "1.0.6",
+ "version": "1.0.9",
   "core": [
   "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/store.js",
   "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/core.js"
@@ -18,5 +18,6 @@
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/autoSearchFilters.js"
   ]
 }
+
 
 
