@@ -1,8 +1,9 @@
 {
   "version": "1.0.3",
   "core": [
-    "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/core.js"
-  ],
+  "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/store.js",
+  "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/core.js"
+],
   "menu": [
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/menu.js",
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/menu-grouper.js"
@@ -17,3 +18,4 @@
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/autoSearchFilters.js"
   ]
 }
+
