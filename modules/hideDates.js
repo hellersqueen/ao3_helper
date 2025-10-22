@@ -1,22 +1,26 @@
-/* modules/hideDates.js — Hide dates via Standard Lifecycle Rule
-   - Aucun GM_* direct, aucune auto-exécution.
-   - Le core appelle start()/stop() selon le toggle (flags).
-   - Ajoute/retire une classe sur <html> + injecte un style scoping.
+/* modules/hideDates.js — compat core actuel (Flags) + zéro GM_*
+   - Ne s’auto-démarre pas à l’aveugle : se cale sur le flag
+   - Aucun GM_* (persistance via ton core + store.js)
+   - Ajoute/retire une classe sur <html> et injecte un style scoping
 */
 
 ;(function () {
   'use strict';
 
-  const AO3H  = window.AO3H || {};
-  const NS    = AO3H.env?.NS || 'ao3h';
-  const MOD   = 'HideDates';
-  const LOG   = (AO3H.util && AO3H.util.log) ? AO3H.util.log : console;
+  const AO3H   = window.AO3H || {};
+  const NS     = AO3H.env?.NS || 'ao3h';
+  const Flags  = AO3H.flags;
+  const LOG    = (AO3H.util && AO3H.util.log) ? AO3H.util.log : console;
 
-  // Classe appliquée au scope (on prend <html> pour couvrir tout)
+  const MOD        = 'HideDates';
+  const ENABLE_KEY = `mod:${MOD}:enabled`;
   const HIDE_CLASS = `${NS}-hide-dates`;
   const STYLE_ID   = `${NS}-${MOD}-style`;
 
-  let RUNNING = false;
+  if (!AO3H.modules?.register || !Flags) {
+    LOG?.warn?.(`[${MOD}] AO3H core/flags missing; aborting init`);
+    return;
+  }
 
   function installStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -47,45 +51,33 @@
     if (node && node.parentNode) node.parentNode.removeChild(node);
   }
 
-  function addScopeClass() {
-    document.documentElement.classList.add(HIDE_CLASS);
+  function apply(on) {
+    document.documentElement.classList.toggle(HIDE_CLASS, !!on);
   }
 
-  function removeScopeClass() {
-    document.documentElement.classList.remove(HIDE_CLASS);
-  }
+  // Enregistrement avec la signature actuelle du core:
+  // register(id, meta, initFn) where initFn peut retourner un disposer
+  AO3H.modules.register(
+    MOD,
+    { title: 'Hide dates', enabledByDefault: true },
+    function init () {
+      installStyles();
 
-  // ── Lifecycle API ───────────────────────────────────────────────
-  async function start() {
-    if (RUNNING) return;
-    RUNNING = true;
+      // état initial depuis les flags
+      apply(!!Flags.get(ENABLE_KEY, true));
 
-    installStyles();
-    addScopeClass();
+      // suivre le toggle (core met à jour le flag → on s’applique)
+      const unwatch = Flags.watch(ENABLE_KEY, v => apply(!!v));
 
-    try {
-      LOG.debug?.(`[AO3H] [${MOD}] started`);
-    } catch {}
-  }
+      try { LOG.debug?.(`[AO3H] [${MOD}] ready`); } catch {}
 
-  async function stop() {
-    if (!RUNNING) return;
-    RUNNING = false;
-
-    removeScopeClass();
-    removeStyles();
-
-    try {
-      LOG.debug?.(`[AO3H] [${MOD}] stopped`);
-    } catch {}
-  }
-
-  // Enregistre le module auprès du core (Standard Lifecycle Rule)
-  if (AO3H.modules?.register) {
-    AO3H.modules.register(MOD, { start, stop });
-    try { LOG.debug?.(`[AO3H] [${MOD}] ready`); } catch {}
-  } else {
-    // Si le core n'est pas encore prêt, on expose dans un hook minimal
-    (AO3H.pendingModules = AO3H.pendingModules || []).push([MOD, { start, stop }]);
-  }
+      // disposer: arrêter d’écouter + retirer l’effet
+      return () => {
+        try { unwatch?.(); } catch {}
+        apply(false);
+        removeStyles();
+        try { LOG.debug?.(`[AO3H] [${MOD}] stopped`); } catch {}
+      };
+    }
+  );
 })();
