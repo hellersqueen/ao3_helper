@@ -1,58 +1,91 @@
-/* modules/hideDates.js — hide dates via the module's own toggle */
+/* modules/hideDates.js — Hide dates via Standard Lifecycle Rule
+   - Aucun GM_* direct, aucune auto-exécution.
+   - Le core appelle start()/stop() selon le toggle (flags).
+   - Ajoute/retire une classe sur <html> + injecte un style scoping.
+*/
+
 ;(function () {
   'use strict';
 
-  const AO3H = window.AO3H || {};
-  const NS   = AO3H.env?.NS || 'ao3h';
-  const Flags = AO3H.flags;
-  const log   = AO3H.util?.log || console;
+  const AO3H  = window.AO3H || {};
+  const NS    = AO3H.env?.NS || 'ao3h';
+  const MOD   = 'HideDates';
+  const LOG   = (AO3H.util && AO3H.util.log) ? AO3H.util.log : console;
 
-  const MOD = 'HideDates';
-  const ENABLE_KEY = `mod:${MOD}:enabled`;   // the ONLY toggle we use now
+  // Classe appliquée au scope (on prend <html> pour couvrir tout)
   const HIDE_CLASS = `${NS}-hide-dates`;
+  const STYLE_ID   = `${NS}-${MOD}-style`;
 
-  if (!AO3H.modules?.register || !Flags) {
-    log?.warn?.(`[${MOD}] AO3H core missing; aborting init`);
-    return;
+  let RUNNING = false;
+
+  function installStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const css = `
+      /* AO3H:${MOD} — masque différentes zones contenant des dates */
+      html.${HIDE_CLASS} time,
+      html.${HIDE_CLASS} .datetime,
+      html.${HIDE_CLASS} .posted,
+      html.${HIDE_CLASS} .status,
+      html.${HIDE_CLASS} dl.stats dd.published,
+      html.${HIDE_CLASS} dl.stats dd.status,
+      html.${HIDE_CLASS} .series .datetime,
+      html.${HIDE_CLASS} .chapter .datetime,
+      html.${HIDE_CLASS} .work .datetime {
+        display: none !important;
+      }
+    `.trim();
+
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.type = 'text/css';
+    style.appendChild(document.createTextNode(css));
+    document.documentElement.appendChild(style);
   }
 
-  // CSS once
-  (function injectCSS(){
-    const CSS_ID = 'ao3h-hide-dates';
-    const CSS_TEXT = `
-      html.${HIDE_CLASS} p.datetime,
-      html.${HIDE_CLASS} dd.published,
-      html.${HIDE_CLASS} dd.status,
-      html.${HIDE_CLASS} dd.completed,
-      html.${HIDE_CLASS} li.published,
-      html.${HIDE_CLASS} li.status,
-      html.${HIDE_CLASS} li.completed { display: none !important; }
-    `;
-    if (AO3H.util?.css) AO3H.util.css(CSS_TEXT, CSS_ID);
-    else if (!document.getElementById(CSS_ID)) {
-      const s = document.createElement('style'); s.id = CSS_ID; s.textContent = CSS_TEXT;
-      document.head.appendChild(s);
-    }
-  })();
-
-  function apply(on) {
-    document.documentElement.classList.toggle(HIDE_CLASS, !!on);
+  function removeStyles() {
+    const node = document.getElementById(STYLE_ID);
+    if (node && node.parentNode) node.parentNode.removeChild(node);
   }
 
-  AO3H.modules.register(MOD, { title: 'Hide dates', enabledByDefault: true }, async function init () {
-    // If an old UI toggle exists from earlier builds, remove its menu item.
+  function addScopeClass() {
+    document.documentElement.classList.add(HIDE_CLASS);
+  }
+
+  function removeScopeClass() {
+    document.documentElement.classList.remove(HIDE_CLASS);
+  }
+
+  // ── Lifecycle API ───────────────────────────────────────────────
+  async function start() {
+    if (RUNNING) return;
+    RUNNING = true;
+
+    installStyles();
+    addScopeClass();
+
     try {
-      const oldKey = `ui:${MOD}:hidden`;
-      document
-        .querySelectorAll(`[data-flag="${oldKey}"], [data-ao3h-flag="${oldKey}"]`)
-        .forEach(n => n.closest('[role="menuitem"], .menu-item, li, label')?.remove());
+      LOG.debug?.(`[AO3H] [${MOD}] started`);
     } catch {}
+  }
 
-    // Sync to module enabled state only.
-    apply(!!Flags.get(ENABLE_KEY, true));
-    const unwatch = Flags.watch(ENABLE_KEY, v => apply(!!v));
+  async function stop() {
+    if (!RUNNING) return;
+    RUNNING = false;
 
-    log?.info?.(`[${MOD}] ready`);
-    return () => { try { unwatch?.(); } catch {} apply(false); };
-  });
+    removeScopeClass();
+    removeStyles();
+
+    try {
+      LOG.debug?.(`[AO3H] [${MOD}] stopped`);
+    } catch {}
+  }
+
+  // Enregistre le module auprès du core (Standard Lifecycle Rule)
+  if (AO3H.modules?.register) {
+    AO3H.modules.register(MOD, { start, stop });
+    try { LOG.debug?.(`[AO3H] [${MOD}] ready`); } catch {}
+  } else {
+    // Si le core n'est pas encore prêt, on expose dans un hook minimal
+    (AO3H.pendingModules = AO3H.pendingModules || []).push([MOD, { start, stop }]);
+  }
 })();
