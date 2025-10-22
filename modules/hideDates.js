@@ -80,7 +80,7 @@
   // 2) Register (signature actuelle: init() retourne un disposer)
   AO3H.modules.register(
     MOD,
-    { title: 'Hide dates (DIAG)', enabledByDefault: true },
+    { title: 'Hide dates', enabledByDefault: true },
     function init () {
       try { LOG.info?.(`[AO3H][${MOD}] DIAG: init() called`); } catch {}
 
@@ -107,3 +107,4 @@
     }
   );
 })();
+
