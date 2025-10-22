@@ -1,3 +1,50 @@
+// ─── GM shim (fallback vers localStorage si on n'est pas dans le sandbox TM) ───
+(() => {
+  const hasGM =
+    typeof window.GM_getValue === 'function' &&
+    typeof window.GM_setValue === 'function' &&
+    typeof window.GM_deleteValue === 'function' &&
+    typeof window.GM_listValues === 'function';
+
+  if (hasGM) return; // On est dans Tampermonkey: rien à faire.
+
+  // Équivalents locaux (page-context) basés sur localStorage
+  const lsGet = (k, d) => {
+    try {
+      const raw = localStorage.getItem(k);
+      return raw == null ? d : JSON.parse(raw);
+    } catch {
+      return d;
+    }
+  };
+  const lsSet = (k, v) => {
+    try {
+      localStorage.setItem(k, JSON.stringify(v));
+    } catch {}
+  };
+  const lsDel = (k) => {
+    try {
+      localStorage.removeItem(k);
+    } catch {}
+  };
+  const lsKeys = () => {
+    try {
+      return Object.keys(localStorage);
+    } catch {
+      return [];
+    }
+  };
+
+  // On expose des fonctions avec les mêmes noms que GM_*
+  window.GM_getValue = lsGet;
+  window.GM_setValue = lsSet;
+  window.GM_deleteValue = lsDel;
+  window.GM_listValues = lsKeys;
+
+  // (Optionnel) petit log discret pour debug
+  try { console.debug('[AO3H] GM shim actif (fallback localStorage)'); } catch {}
+})();
+
 ;(function(){
   'use strict';
   const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
