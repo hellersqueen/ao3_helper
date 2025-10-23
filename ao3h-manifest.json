@@ -1,5 +1,5 @@
 {
- "version": "1.1.1",
+ "version": "1.1.2",
   "core": [
   "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/store.js",
   "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/core.js"
@@ -14,10 +14,12 @@
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/chapterWordCount.js",
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideByTags.js",
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideFanficWithNotes.js",
+   "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/checkForKudos.js",
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/hideWordCount.js",
     "https://raw.githubusercontent.com/hellersqueen/ao3_helper/main/modules/autoSearchFilters.js"
   ]
 }
+
 
 
 
