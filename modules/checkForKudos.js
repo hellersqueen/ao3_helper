@@ -787,6 +787,58 @@ if (alreadyKudosed || userPresentInKudos(document.getElementById('kudos'), usern
     console.log('✅ [KudosExport] Auto-exported:', filename);
   }
 
+/* =======================================================================
+   KUDOS LOADING OVERLAY (mount ASAP on /kudos-history)
+   ======================================================================= */
+(function kudosLoadingOverlay(){
+  'use strict';
+  if (!/\/users\/[^/]+\/kudos-history(?:\/?|$)/.test(location.pathname)) return;
+
+  // CSS (idempotent)
+  if (!document.getElementById('ao3h-wait-css')) {
+    const s = document.createElement('style');
+    s.id = 'ao3h-wait-css';
+    s.textContent = `
+      #ao3h-wait{position:fixed;inset:0;z-index:999999;display:grid;place-items:center;
+        background:color-mix(in srgb, #000 35%, transparent);backdrop-filter:saturate(1.2) blur(2px)}
+      #ao3h-wait .card{min-width:260px;max-width:420px;padding:16px 18px;border-radius:12px;
+        background:#fff;border:1px solid rgba(0,0,0,.12);box-shadow:0 10px 28px rgba(0,0,0,.18);
+        color:#111;text-align:center;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+      @media (prefers-color-scheme:dark){
+        #ao3h-wait .card{background:#151518;border-color:#26262b;color:#f3f3f3}
+      }
+      #ao3h-wait .spin{width:20px;height:20px;border-radius:50%;
+        border:3px solid rgba(0,0,0,.15);border-top-color:#8f0a0a; margin:6px auto 10px; animation:awspin 1s linear infinite}
+      @keyframes awspin{to{transform:rotate(360deg)}}
+    `;
+    (document.head || document.documentElement).appendChild(s);
+  }
+
+  // Overlay (idempotent)
+  if (!document.getElementById('ao3h-wait')) {
+    const d = document.createElement('div');
+    d.id = 'ao3h-wait';
+    d.innerHTML = `
+      <div class="card" role="status" aria-live="polite">
+        <div class="spin" aria-hidden="true"></div>
+        <div><strong>AO3 Helper</strong></div>
+        <div>Loading your Kudos History…</div>
+      </div>
+    `;
+    (document.body || document.documentElement).appendChild(d);
+
+    // Safety: after 20s, let user dismiss if the site hangs
+    setTimeout(() => {
+      const el = document.getElementById('ao3h-wait');
+      if (el) {
+        el.title = 'Click to dismiss';
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', () => el.remove(), { once: true });
+      }
+    }, 20000);
+  }
+})();
+
   /* ─────────── Route: Kudos page only ─────────── */
   (function kudosPageMain() {
   'use strict';
@@ -1863,3 +1915,4 @@ if (stale.length) {
 
 }, 120);
 })();
+
