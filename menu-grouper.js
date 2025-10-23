@@ -10,9 +10,26 @@
 
   // ---- group config (module IDs are case-insensitive) ----
   const GROUPS = [
-    { label: 'Reading',            include: ['saveScroll','chapterWordCount'],                                        match: /(scroll|chapter\s*word|read)/i },
-    { label: 'Search',             include: ['autoSearchFilters'],                                                     match: /(search|filter)/i },
-    { label: 'Hiding / Filtering', include: ['hideByTags','hideFanficWithNotes','hideWordCount','hideDates'],         match: /(hide|block|filter|mute)/i },
+    { 
+      label: 'Reading',            
+      include: ['saveScroll','chapterWordCount'],                                        
+      match: /(scroll|chapter\s*word|read)/i 
+    },
+    { 
+      label: 'Search',             
+      include: ['autoSearchFilters'],                                                     
+      match: /(search|filter)/i 
+    },
+    { 
+      label: 'Hiding / Filtering', 
+      include: ['hideByTags','hideFanficWithNotes','hideWordCount','hideDates'],         
+      match: /(hide|block|filter|mute)/i 
+    },
+    {
+      label: 'Engagement',
+      include: [ 'kudosHitRatio', 'checkForKudos',],
+      match: /(kudos|ratio|like|engagement)/i
+    },
   ];
 
   // ---- utils & NS ----
@@ -334,3 +351,4 @@ function hookMenuRebuild(){
 
   ready(boot);
 })();
+
